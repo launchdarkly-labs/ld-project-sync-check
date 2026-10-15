@@ -1,0 +1,6 @@
+# Local run output and configs (may contain project keys; never tokens)
+out/
+*.local.json
+.env
+.DS_Store
+.claude/
