@@ -5,61 +5,85 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src https://app.launchdarkly.com https://app.eu.launchdarkly.com https://clientsdk.launchdarkly.com https://clientsdk.eu.launchdarkly.com; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
   <meta name="referrer" content="no-referrer">
+  <meta name="color-scheme" content="dark light">
   <title>LaunchDarkly Project Sync Check</title>
+  <link rel="icon" type="image/svg+xml" href="./web/brand/favicon.svg">
+  <link rel="stylesheet" href="./web/brand/colors.css">
   <link rel="stylesheet" href="./web/styles.css">
 </head>
 <body>
-  <header>
-    <h1>LaunchDarkly project sync check</h1>
-    <p class="sub">Compares two projects field by field, as your SDKs would see them, and reports whether they are in sync. Runs entirely in your browser: tokens are sent only to LaunchDarkly and are never stored unless you ask.</p>
+  <header class="topbar">
+    <div class="wrap topbar-inner">
+      <div class="lockup">
+        <img class="logo-on-dark" src="./web/brand/ld-logo-white.svg" alt="LaunchDarkly" width="160" height="25">
+        <img class="logo-on-light" src="./web/brand/ld-logo-black.svg" alt="LaunchDarkly" width="160" height="25">
+        <span class="divider" aria-hidden="true"></span>
+        <span class="product">Project Sync Check</span>
+      </div>
+      <a class="source-link" href="https://github.com/launchdarkly-labs/ld-project-sync-check" rel="noopener noreferrer">Source on GitHub</a>
+    </div>
   </header>
 
-  <main>
-    <form id="form" autocomplete="off">
-      <div class="sides">
-        <fieldset class="side" data-side="a">
-          <legend>Side A (source)</legend>
-          <label>Instance
-            <select name="a-host">
-              <option value="https://app.launchdarkly.com">US · app.launchdarkly.com</option>
-              <option value="https://app.eu.launchdarkly.com">EU · app.eu.launchdarkly.com</option>
-            </select>
-          </label>
-          <label>Project key <input name="a-project" required placeholder="my-project" spellcheck="false"></label>
-          <label>API token <input name="a-token" type="password" required placeholder="api-…" autocomplete="off" spellcheck="false"></label>
-          <button type="button" class="connect" data-side="a">Connect</button>
-          <div class="conn" data-side="a"></div>
-        </fieldset>
-        <fieldset class="side" data-side="b">
-          <legend>Side B (target)</legend>
-          <label>Instance
-            <select name="b-host">
-              <option value="https://app.launchdarkly.com">US · app.launchdarkly.com</option>
-              <option value="https://app.eu.launchdarkly.com" selected>EU · app.eu.launchdarkly.com</option>
-            </select>
-          </label>
-          <label>Project key <input name="b-project" required placeholder="my-project" spellcheck="false"></label>
-          <label>API token <input name="b-token" type="password" required placeholder="api-…" autocomplete="off" spellcheck="false"></label>
-          <button type="button" class="connect" data-side="b">Connect</button>
-          <div class="conn" data-side="b"></div>
-        </fieldset>
-      </div>
+  <main class="wrap">
+    <section class="hero">
+      <h1>Are your projects in sync?</h1>
+      <p class="lede">Compares two LaunchDarkly projects field by field, as your SDKs would see them. Tokens are sent only to LaunchDarkly and are never stored unless you ask.</p>
+    </section>
 
-      <fieldset>
-        <legend>Environment mapping</legend>
+    <form id="form" autocomplete="off">
+      <section class="step">
+        <header class="step-head"><span class="num">1</span><h2>Projects</h2></header>
+        <div class="sides">
+          <fieldset class="side" data-side="a">
+            <legend><span class="side-chip">A</span> Source</legend>
+            <label>Instance
+              <select name="a-host">
+                <option value="https://app.launchdarkly.com">US · app.launchdarkly.com</option>
+                <option value="https://app.eu.launchdarkly.com">EU · app.eu.launchdarkly.com</option>
+              </select>
+            </label>
+            <label>Project key <input name="a-project" required placeholder="my-project" spellcheck="false"></label>
+            <label>API token <input name="a-token" type="password" required placeholder="api-…" autocomplete="off" spellcheck="false"></label>
+            <div class="side-foot">
+              <button type="button" class="connect" data-side="a">Connect</button>
+              <div class="conn" data-side="a" aria-live="polite"></div>
+            </div>
+          </fieldset>
+          <fieldset class="side" data-side="b">
+            <legend><span class="side-chip">B</span> Target</legend>
+            <label>Instance
+              <select name="b-host">
+                <option value="https://app.launchdarkly.com">US · app.launchdarkly.com</option>
+                <option value="https://app.eu.launchdarkly.com" selected>EU · app.eu.launchdarkly.com</option>
+              </select>
+            </label>
+            <label>Project key <input name="b-project" required placeholder="my-project" spellcheck="false"></label>
+            <label>API token <input name="b-token" type="password" required placeholder="api-…" autocomplete="off" spellcheck="false"></label>
+            <div class="side-foot">
+              <button type="button" class="connect" data-side="b">Connect</button>
+              <div class="conn" data-side="b" aria-live="polite"></div>
+            </div>
+          </fieldset>
+        </div>
+      </section>
+
+      <section class="step">
+        <header class="step-head"><span class="num">2</span><h2>Environment mapping</h2></header>
         <p class="hint">Connect both sides to load environments. Each row compares one A environment against one B environment. Leave a row blank to skip it.</p>
         <div id="envmap"></div>
-        <button type="button" id="add-row" class="ghost">+ Add row</button>
-      </fieldset>
+        <button type="button" id="add-row" class="ghost small">+ Add row</button>
+      </section>
 
-      <fieldset class="options">
-        <legend>Options</legend>
-        <label><input type="checkbox" name="include-archived"> Include archived flags</label>
-        <label><input type="checkbox" name="compare-maintainers"> Compare maintainers (by email)</label>
-        <label><input type="checkbox" name="strict-extra"> Treat flags only in B as errors</label>
-        <label><input type="checkbox" name="remember"> Remember tokens in this tab only (sessionStorage)</label>
-        <label class="inline">Key prefix on B <input name="key-prefix" placeholder="(none)" spellcheck="false"></label>
-      </fieldset>
+      <section class="step">
+        <header class="step-head"><span class="num">3</span><h2>Options</h2></header>
+        <div class="options">
+          <label class="check"><input type="checkbox" name="include-archived" checked> Include archived flags</label>
+          <label class="check"><input type="checkbox" name="compare-maintainers"> Compare maintainers (by email)</label>
+          <label class="check"><input type="checkbox" name="strict-extra"> Treat flags only in B as errors</label>
+          <label class="check" title="Stored in sessionStorage; cleared when the tab closes"><input type="checkbox" name="remember"> Remember tokens for this tab</label>
+          <label class="inline">Key prefix on B <input name="key-prefix" placeholder="(none)" spellcheck="false"></label>
+        </div>
+      </section>
 
       <div class="actions">
         <button type="submit" id="run" class="primary">Run sync check</button>
@@ -73,15 +97,19 @@
       <div class="status-row">
         <div id="status" class="status"></div>
         <div class="downloads">
-          <button type="button" id="dl-json" class="ghost">Download JSON</button>
-          <button type="button" id="dl-md" class="ghost">Download Markdown</button>
+          <button type="button" id="dl-json" class="ghost small">Download JSON</button>
+          <button type="button" id="dl-md" class="ghost small">Download Markdown</button>
         </div>
       </div>
-      <div id="summary" class="cards"></div>
-      <div id="lists"></div>
+      <div id="summary" class="summary"></div>
+
+      <div class="section-head">
+        <h2>Flags</h2>
+        <div id="state-tabs" class="tabs" role="tablist" aria-label="Flag state"></div>
+      </div>
       <div class="table-tools">
-        <label>Filter <input id="filter" placeholder="key or path"></label>
-        <label>Status
+        <label>Search <input id="filter" type="search" placeholder="key or path"></label>
+        <label>Result
           <select id="status-filter">
             <option value="">all</option>
             <option value="differs">differs</option>
@@ -90,17 +118,19 @@
             <option value="identical">identical</option>
           </select>
         </label>
-        <span id="count"></span>
+        <span id="count" class="muted"></span>
       </div>
-      <div id="flags"></div>
-      <h2>Segments</h2>
-      <div id="segments"></div>
+      <div id="lists"></div>
+      <div id="flags" class="table-wrap"></div>
+
+      <div class="section-head"><h2>Segments</h2></div>
+      <div id="segments" class="table-wrap"></div>
       <div id="errors"></div>
     </section>
   </main>
 
-  <footer>
-    <p>Static page, no backend, no analytics. Use read-only API tokens. Source: <a href="https://github.com/launchdarkly-labs/ld-project-sync-check">launchdarkly-labs/ld-project-sync-check</a>.</p>
+  <footer class="wrap">
+    <p>Static page, no backend, no analytics. Use read-only API tokens. Source: <a href="https://github.com/launchdarkly-labs/ld-project-sync-check" rel="noopener noreferrer">launchdarkly-labs/ld-project-sync-check</a>.</p>
   </footer>
   <script type="module" src="./web/app.js"></script>
 </body>
