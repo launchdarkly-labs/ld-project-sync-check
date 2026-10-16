@@ -1,11 +1,11 @@
 import { makeClient } from "../lib/ld_api.js";
 import { compareProjects } from "../lib/compare.js";
 import { toMarkdown } from "../lib/report.js";
-import { el, renderErrors, renderFlags, renderLists, renderSegments, renderStatus, renderSummary } from "./render.js";
+import { el, inState, renderErrors, renderFlags, renderLists, renderSegments, renderStateTabs, renderStatus, renderSummary, SORTS } from "./render.js";
 
 const $ = (sel) => document.querySelector(sel);
 const form = $("#form");
-const state = { clients: {}, envs: { a: [], b: [] }, report: null, abort: null };
+const state = { clients: {}, envs: { a: [], b: [] }, report: null, abort: null, flagState: "active", sort: null };
 
 // --- token persistence (opt-in, sessionStorage only) ---
 const KEY = "ld-sync-check";
@@ -43,20 +43,18 @@ function clientFor(side) {
 }
 async function connect(side) {
   const out = document.querySelector(`.conn[data-side="${side}"]`);
-  out.className = "conn";
-  out.textContent = "Connecting…";
+  const setConn = (cls, text) => { out.textContent = ""; out.append(el("span", { class: `dot ${cls}`, "aria-hidden": "true" }), text); };
+  setConn("busy", "Connecting…");
   try {
     const client = clientFor(side);
     const project = form.elements[`${side}-project`].value.trim();
     const [who, envs] = await Promise.all([client.callerIdentity(), client.listEnvironments(project)]);
     state.clients[side] = client;
     state.envs[side] = envs.map((e) => e.key);
-    out.className = "conn ok";
-    out.textContent = `Connected as ${who.tokenName ?? who.memberEmail ?? who.accountId ?? "token"} · ${envs.length} environment(s): ${state.envs[side].join(", ")}`;
+    setConn("ok", `Connected as ${who.tokenName ?? who.memberEmail ?? who.accountId ?? "token"} · ${envs.length} environment(s): ${state.envs[side].join(", ")}`);
     rebuildEnvMap();
   } catch (err) {
-    out.className = "conn err";
-    out.textContent = `Failed: ${err.message}${err.status === 401 || err.status === 403 ? " (check the token and its project access)" : ""}`;
+    setConn("err", `Failed: ${err.message}${err.status === 401 || err.status === 403 ? " (check the token and its project access)" : ""}`);
   }
 }
 document.querySelectorAll(".connect").forEach((b) => b.addEventListener("click", () => connect(b.dataset.side)));
@@ -147,24 +145,43 @@ const labelFor = (u) => (u.includes(".eu.") ? "EU" : u.includes("launchdarkly.co
 function show(report) {
   $("#results").hidden = false;
   renderStatus($("#status"), report);
-  renderSummary($("#summary"), report);
-  renderLists($("#lists"), report);
+  renderSummary($("#summary"), report, (status) => {
+    $("#status-filter").value = $("#status-filter").value === status ? "" : status;
+    if (status === "extraInB" || status === "missingInB") state.flagState = "all";
+    applyFilter();
+    $("#flags").scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+  state.flagState = "active";
+  state.sort = null;
   applyFilter();
   renderSegments($("#segments"), report.segments);
   renderErrors($("#errors"), report.errors);
   $("#results").scrollIntoView({ behavior: "smooth" });
 }
 function applyFilter() {
-  if (!state.report) return;
+  const report = state.report;
+  if (!report) return;
   const q = $("#filter").value.trim().toLowerCase();
   const st = $("#status-filter").value;
-  const rows = state.report.flags.filter((f) => {
+  // Search + result filter first; the state tabs count what those leave.
+  const matching = report.flags.filter((f) => {
     if (st && f.status !== st) return false;
     if (!q) return true;
     if (f.key.toLowerCase().includes(q)) return true;
     return [...f.flagLevel, ...Object.values(f.environments).flat()].some((e) => e.path.toLowerCase().includes(q));
   });
-  renderFlags($("#flags"), rows, $("#count"));
+  const archivedFetched = report.options.includeArchived;
+  renderStateTabs($("#state-tabs"), matching, state.flagState, archivedFetched, (id) => { state.flagState = id; applyFilter(); });
+  const rows = matching.filter(inState(state.flagState));
+  renderLists($("#lists"), report.flags.filter(inState(state.flagState)));
+  renderFlags($("#flags"), {
+    flags: rows, sides: report.sides, sort: state.sort, state: state.flagState, archivedFetched, countEl: $("#count"),
+    onSort: (key) => {
+      const s = state.sort;
+      state.sort = s?.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: SORTS[key].firstDir };
+      applyFilter();
+    },
+  });
 }
 $("#filter").addEventListener("input", applyFilter);
 $("#status-filter").addEventListener("change", applyFilter);

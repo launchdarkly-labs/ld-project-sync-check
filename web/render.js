@@ -17,37 +17,116 @@ export function badge(text) {
   return el("span", { class: `badge ${text}` }, text === "missingInB" ? "missing in B" : text === "extraInB" ? "only in B" : text);
 }
 
+// --- time helpers ---
+const DAY = 86400000;
+export function relTime(iso, now = Date.now()) {
+  if (!iso) return "";
+  const d = now - Date.parse(iso);
+  if (d < 60000) return "just now";
+  if (d < 3600000) return `${Math.floor(d / 60000)} min ago`;
+  if (d < DAY) return `${Math.floor(d / 3600000)} h ago`;
+  if (d < 30 * DAY) return `${Math.floor(d / DAY)} d ago`;
+  return new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}
+const fullTime = (iso) => (iso ? new Date(iso).toLocaleString() : undefined);
+const isRecent = (iso) => Boolean(iso) && Date.now() - Date.parse(iso) < 7 * DAY;
+
+// --- lifecycle state ---
+export const STATES = [
+  { id: "active", label: "Active", test: (f) => !f.archived },
+  { id: "deprecated", label: "Deprecated", test: (f) => f.deprecated && !f.archived },
+  { id: "archived", label: "Archived", test: (f) => f.archived },
+  { id: "all", label: "All", test: () => true },
+];
+export const inState = (state) => STATES.find((s) => s.id === state)?.test ?? (() => true);
+
+export function renderStateTabs(container, flags, current, archivedFetched, onSelect) {
+  container.textContent = "";
+  for (const s of STATES) {
+    const n = flags.filter(s.test).length;
+    const count = s.id === "archived" && !archivedFetched ? "—" : n;
+    container.append(el("button", {
+      type: "button", role: "tab", "aria-selected": String(s.id === current),
+      onclick: () => onSelect(s.id),
+    }, s.label, el("span", { class: "c" }, count)));
+  }
+}
+
 export function renderStatus(container, report) {
   const s = report.summary;
   container.textContent = "";
   container.className = `status ${s.status}`;
-  const icon = { pass: "✅", warn: "⚠️", fail: "❌" }[s.status];
-  container.append(`${icon} ${s.status.toUpperCase()} · `, el("span", { style: "font-weight:400;font-size:15px" }, `${s.counts.error} errors, ${s.counts.warning} warnings, ${s.counts.info} info · ${new Date(report.generatedAt).toLocaleString()}`));
+  container.append(
+    el("span", { class: "verdict" }, s.status.toUpperCase()),
+    el("span", { class: "meta" },
+      el("strong", {}, `${s.counts.error} errors`), ` · ${s.counts.warning} warnings · ${s.counts.info} info`,
+      el("br"),
+      `${report.sides.a.projectKey} (${report.sides.a.label}) → ${report.sides.b.projectKey} (${report.sides.b.label}) · ${new Date(report.generatedAt).toLocaleString()}`),
+  );
 }
 
-export function renderSummary(container, report) {
+/**
+ * Summary: source/target pair, flag results (proportion bar + one tile per result, click to
+ * filter the table), and one tile per segment environment pair.
+ */
+export function renderSummary(container, report, onPick = () => {}) {
   const f = report.summary.flags;
+  const archived = report.options.includeArchived;
+  const pct = (n, of) => (of ? `${Math.round((n / of) * 100)}%` : "—");
   container.textContent = "";
-  const card = (n, l, cls) => el("div", { class: `card ${cls ?? ""}` }, el("div", { class: "n" }, n), el("div", { class: "l" }, l));
-  container.append(
-    card(f.a, `flags in A (${report.sides.a.label})`),
-    card(f.b, `flags in B (${report.sides.b.label})`),
-    card(f.identical, "identical", "ok"),
-    card(f.differing, "differing", f.differing ? "err" : "ok"),
-    card(f.missingInB, "missing in B", f.missingInB ? "err" : "ok"),
-    card(f.extraInB, "only in B", f.extraInB ? "warn" : "ok"),
+  const group = (label, ...kids) => el("section", { class: "sum-group" }, el("h3", { class: "sum-label" }, label), ...kids);
+
+  const side = (id, s, total, arch) => el("div", { class: "tile side-tile" },
+    el("div", { class: "tile-top" }, el("span", { class: "side-chip" }, id.toUpperCase()), el("span", { class: "tile-title" }, id === "a" ? "Source" : "Target"), el("span", { class: "tile-tag" }, s.label)),
+    el("div", { class: "tile-n" }, total, el("span", { class: "unit" }, " flags")),
+    el("div", { class: "tile-sub" }, el("code", {}, s.projectKey), archived ? ` · ${total - arch} active · ${arch} archived` : " · active only"),
   );
-  for (const [env, g] of Object.entries(report.summary.segments)) {
-    container.append(card(`${g.identical}/${g.a}`, `segments identical · ${env}`, g.identical === g.a && g.extraInB === 0 ? "ok" : "err"));
+
+  const results = [
+    { id: "identical", label: "Identical", n: f.identical, sub: `${pct(f.identical, f.a)} of A`, tone: "ok" },
+    { id: "differs", label: "Differing", n: f.differing, sub: "fields differ", tone: "warn" },
+    { id: "missingInB", label: "Missing in B", n: f.missingInB, sub: "not in target", tone: "err" },
+    { id: "extraInB", label: "Only in B", n: f.extraInB, sub: "extra in target", tone: "info" },
+  ];
+  const total = results.reduce((a, r) => a + r.n, 0);
+  const bar = el("div", { class: "bar", role: "img", "aria-label": results.map((r) => `${r.label} ${r.n}`).join(", ") },
+    results.filter((r) => r.n).map((r) => {
+      const seg = el("span", { class: `seg ${r.tone}`, title: `${r.label}: ${r.n}` });
+      seg.style.flexGrow = String(r.n); // CSSOM, not a style attribute: CSP has no 'unsafe-inline'
+      return seg;
+    }));
+  const tiles = el("div", { class: "result-tiles" }, results.map((r) => el("button", {
+    type: "button", class: `tile result ${r.n ? r.tone : "zero"}`, title: `Show ${r.label.toLowerCase()} flags`,
+    onclick: () => onPick(r.id),
+  }, el("div", { class: "tile-top" }, el("span", { class: "swatch" }), el("span", { class: "tile-title" }, r.label)),
+    el("div", { class: "tile-n" }, r.n), el("div", { class: "tile-sub" }, r.sub))));
+
+  container.append(
+    group("Projects", el("div", { class: "side-tiles" }, side("a", report.sides.a, f.a, f.archivedA), side("b", report.sides.b, f.b, f.archivedB))),
+    group(`Flag results · ${total} compared`, el("div", { class: "results-card" }, bar, tiles)),
+  );
+
+  const segs = Object.entries(report.summary.segments);
+  if (segs.length) {
+    container.append(group("Segments", el("div", { class: "seg-tiles" }, segs.map(([env, g]) => {
+      const clean = g.identical === g.a && g.extraInB === 0;
+      const issues = [g.differing && `${g.differing} differing`, g.missingInB && `${g.missingInB} missing`, g.extraInB && `${g.extraInB} only in B`].filter(Boolean);
+      return el("div", { class: `tile seg-tile ${clean ? "ok" : "err"}` },
+        el("div", { class: "tile-top" }, el("span", { class: "swatch" }), el("span", { class: "tile-title" }, env)),
+        el("div", { class: "tile-n" }, g.identical, el("span", { class: "unit" }, ` / ${g.a} identical`)),
+        el("div", { class: "tile-sub" }, issues.length ? issues.join(" · ") : "all in sync"));
+    }))));
   }
 }
 
-export function renderLists(container, report) {
+/** Quick key lists for the flags currently in view (same state filter as the table). */
+export function renderLists(container, flags) {
   container.textContent = "";
-  const missing = report.flags.filter((x) => x.status === "missingInB");
-  const extra = report.flags.filter((x) => x.status === "extraInB");
-  if (missing.length) container.append(el("div", { class: "list" }, el("strong", {}, `Missing in B (${missing.length}): `), missing.map((x) => el("code", {}, x.key))));
-  if (extra.length) container.append(el("div", { class: "list" }, el("strong", {}, `Only in B (${extra.length}): `), extra.map((x) => el("code", {}, x.key))));
+  const missing = flags.filter((x) => x.status === "missingInB");
+  const extra = flags.filter((x) => x.status === "extraInB");
+  const item = (x, withTime) => el("span", { class: "item", title: withTime && x.createdA ? `Created ${fullTime(x.createdA)}` : undefined }, x.key, withTime && x.createdA ? el("span", { class: "when" }, `created ${relTime(x.createdA)}`) : null);
+  if (missing.length) container.append(el("div", { class: "list" }, el("strong", {}, `Missing in B (${missing.length})`), missing.map((x) => item(x, true))));
+  if (extra.length) container.append(el("div", { class: "list" }, el("strong", {}, `Only in B (${extra.length})`), extra.map((x) => item(x, false))));
 }
 
 function diffTable(entries) {
@@ -58,8 +137,17 @@ function diffTable(entries) {
   return t;
 }
 
-function flagDetail(f) {
-  const d = el("div");
+const flagUrl = (side, key) => `${side.baseUrl}/projects/${encodeURIComponent(side.projectKey)}/flags/${encodeURIComponent(key)}`;
+const extLink = (href, text) => el("a", { href, target: "_blank", rel: "noopener noreferrer" }, text);
+
+function flagDetail(f, sides) {
+  const d = el("div", { class: "detail" });
+  const meta = el("div", { class: "detail-meta" });
+  if (f.createdA) meta.append(el("span", {}, `Created in A ${fullTime(f.createdA)}`));
+  if (f.updatedA) meta.append(el("span", { title: "Latest targeting change among the compared A environments" }, `Last changed ${fullTime(f.updatedA)} (compared envs)`));
+  if (f.status !== "extraInB") meta.append(extLink(flagUrl(sides.a, f.key), "Open in A ↗"));
+  if (f.status !== "missingInB") meta.append(extLink(flagUrl(sides.b, f.keyB), "Open in B ↗"));
+  d.append(meta);
   if (f.flagLevel.length) d.append(el("h4", {}, "Flag level"), diffTable(f.flagLevel));
   for (const [env, entries] of Object.entries(f.environments)) if (entries.length) d.append(el("h4", {}, `Environment ${env}`), diffTable(entries));
   if (!f.flagLevel.length && !Object.values(f.environments).some((e) => e.length)) d.append(el("p", { class: "notes" }, f.status === "identical" ? "No differences." : "No field-level details."));
@@ -67,21 +155,92 @@ function flagDetail(f) {
   return d;
 }
 
-export function renderFlags(container, flags, countEl) {
+/** A clickable / keyboard-toggleable row with a hidden detail row under it. */
+function expandable(cells, colspan, detailContent) {
+  const detail = el("tr", { class: "detail", hidden: true }, el("td", { colspan }, detailContent));
+  const toggle = () => { detail.hidden = !detail.hidden; row.setAttribute("aria-expanded", String(!detail.hidden)); };
+  const row = el("tr", {
+    class: "row", tabindex: "0", "aria-expanded": "false",
+    onclick: (e) => { if (!e.target.closest("a")) toggle(); },
+    onkeydown: (e) => { if (e.target === row && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); toggle(); } },
+  }, cells);
+  return [row, detail];
+}
+
+function stateChips(f) {
+  const chips = [];
+  if (f.droppedRules) chips.push(el("span", { class: "chip", title: "Rule(s) referencing deleted segments; they can't exist in B and never match in A" }, `${f.droppedRules} dead rule${f.droppedRules > 1 ? "s" : ""} skipped`));
+  if (f.archived) chips.push(el("span", { class: "chip" }, "archived"));
+  else if (f.deprecated) chips.push(el("span", { class: "chip" }, "deprecated"));
+  if (f.status !== "extraInB" && f.status !== "missingInB" && f.archivedB !== undefined && f.archivedB !== f.archived) {
+    chips.push(el("span", { class: "chip warn" }, f.archivedB ? "archived in B" : "active in B"));
+  }
+  return chips;
+}
+
+// Ascending comparators; "desc" reverses. Missing timestamps sort as oldest.
+const ts = (iso) => (iso ? Date.parse(iso) : 0);
+export const SORTS = {
+  key: { cmp: (x, y) => x.key.localeCompare(y.key), firstDir: "asc" },
+  created: { cmp: (x, y) => ts(x.createdA) - ts(y.createdA), firstDir: "desc" },
+  updated: { cmp: (x, y) => ts(x.updatedA) - ts(y.updatedA), firstDir: "desc" },
+};
+
+/**
+ * @param {object} o { flags, sides, sort: {key, dir}|null, onSort(key), state, archivedFetched, countEl }
+ */
+export function renderFlags(container, o) {
   container.textContent = "";
+  const { flags, sides, sort, state, countEl } = o;
   countEl.textContent = `${flags.length} flag(s)`;
-  const t = el("table", {}, el("thead", {}, el("tr", {}, el("th", {}, "Flag key"), el("th", {}, "Status"), el("th", {}, "Severity"), el("th", {}, "Findings"))));
+  if (state === "archived" && !o.archivedFetched) {
+    container.append(el("p", { class: "empty" }, "Archived flags were not fetched. Enable “Include archived flags” and run the check again."));
+    return;
+  }
+  if (!flags.length) { container.append(el("p", { class: "empty" }, "No flags match the current filters.")); return; }
+
+  let rows = [...flags];
+  if (sort && SORTS[sort.key]) {
+    rows.sort(SORTS[sort.key].cmp);
+    if (sort.dir === "desc") rows.reverse();
+  }
+  // In "All", archived flags form their own group after the active ones.
+  const grouped = state === "all" && rows.some((f) => f.archived) && rows.some((f) => !f.archived);
+  if (grouped) rows = [...rows.filter((f) => !f.archived), ...rows.filter((f) => f.archived)];
+
+  const th = (label, key, title) => {
+    if (!key) return el("th", { title }, label);
+    const active = sort?.key === key;
+    const arrow = active ? (sort.dir === "asc" ? " ↑" : " ↓") : "";
+    return el("th", { title, "aria-sort": active ? (sort.dir === "asc" ? "ascending" : "descending") : undefined },
+      el("button", { type: "button", class: `sort${active ? " on" : ""}`, onclick: () => o.onSort(key) }, label, arrow));
+  };
+  const COLS = 6;
+  const t = el("table", {}, el("thead", {}, el("tr", {},
+    th("Flag key", "key"),
+    th("Result"),
+    th("Severity"),
+    th("Created (A)", "created", "When the flag was created in the source project"),
+    th("Updated (A)", "updated", "Latest targeting change among the compared source environments"),
+    th("Findings"),
+  )));
   const body = el("tbody");
-  for (const f of flags) {
+  let groupDone = false;
+  for (const f of rows) {
+    if (grouped && f.archived && !groupDone) {
+      body.append(el("tr", { class: "group" }, el("td", { colspan: COLS }, `Archived flags (${rows.filter((x) => x.archived).length})`)));
+      groupDone = true;
+    }
     const n = f.flagLevel.length + Object.values(f.environments).reduce((a, e) => a + e.length, 0);
-    const detail = el("tr", { class: "detail", hidden: true }, el("td", { colspan: 4 }, flagDetail(f)));
-    const row = el("tr", { class: "row", onclick: () => { detail.hidden = !detail.hidden; } },
-      el("td", { class: "key" }, f.key, f.archived ? " (archived)" : ""),
+    const timeCell = (iso) => el("td", { class: `time${isRecent(iso) ? " recent" : ""}`, title: fullTime(iso) }, iso ? relTime(iso) : "—");
+    body.append(...expandable([
+      el("td", { class: "key" }, f.key, stateChips(f)),
       el("td", {}, badge(f.status)),
       el("td", {}, badge(f.severity)),
-      el("td", {}, n ? `${n} field(s)` : "", f.notes.length ? ` · ${f.notes.length} note(s)` : ""),
-    );
-    body.append(row, detail);
+      f.status === "extraInB" ? el("td", { class: "time muted" }, "—") : timeCell(f.createdA),
+      f.status === "extraInB" ? el("td", { class: "time muted" }, "—") : timeCell(f.updatedA),
+      el("td", {}, n ? `${n} field(s)` : "", f.notes.length ? `${n ? " · " : ""}${f.notes.length} note(s)` : ""),
+    ], COLS, flagDetail(f, sides)));
   }
   t.append(body);
   container.append(t);
@@ -89,15 +248,12 @@ export function renderFlags(container, flags, countEl) {
 
 export function renderSegments(container, segments) {
   container.textContent = "";
-  if (!segments.length) { container.append(el("p", { class: "notes" }, "No segments in the compared environments.")); return; }
-  const t = el("table", {}, el("thead", {}, el("tr", {}, el("th", {}, "Segment"), el("th", {}, "Environments"), el("th", {}, "Status"), el("th", {}, "Severity"))));
+  if (!segments.length) { container.append(el("p", { class: "empty" }, "No segments in the compared environments.")); return; }
+  const t = el("table", {}, el("thead", {}, el("tr", {}, el("th", {}, "Segment"), el("th", {}, "Environments"), el("th", {}, "Result"), el("th", {}, "Severity"))));
   const body = el("tbody");
   for (const s of segments) {
-    const detail = el("tr", { class: "detail", hidden: true }, el("td", { colspan: 4 }, s.diffs.length ? diffTable(s.diffs) : el("p", { class: "notes" }, "No differences."), s.notes.length ? el("ul", { class: "notes" }, s.notes.map((n) => el("li", {}, n))) : null));
-    body.append(
-      el("tr", { class: "row", onclick: () => { detail.hidden = !detail.hidden; } }, el("td", { class: "key" }, s.key), el("td", {}, `${s.envA} → ${s.envB}`), el("td", {}, badge(s.status)), el("td", {}, badge(s.severity))),
-      detail,
-    );
+    const detail = el("div", { class: "detail" }, s.diffs.length ? diffTable(s.diffs) : el("p", { class: "notes" }, "No differences."), s.notes.length ? el("ul", { class: "notes" }, s.notes.map((n) => el("li", {}, n))) : null);
+    body.append(...expandable([el("td", { class: "key" }, s.key), el("td", {}, `${s.envA} → ${s.envB}`), el("td", {}, badge(s.status)), el("td", {}, badge(s.severity))], 4, detail));
   }
   t.append(body);
   container.append(t);

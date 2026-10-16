@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import { compareFlags, compareSegments } from "../lib/compare.js";
+import { compareFlags, compareSegments, missingSegmentRules, sourceTimes } from "../lib/compare.js";
 import { summarize, toMarkdown } from "../lib/report.js";
 import { flagA, flagBIdentical, segmentA, segmentBIdentical } from "./fixtures/flags.js";
 
@@ -62,4 +62,73 @@ Deno.test("missing and extra flags, summary status and markdown", () => {
   report.flags = results.filter((r) => r.status === "identical");
   report.summary = summarize(report, { totalA: 1, totalB: 1 });
   assertEquals(report.summary.status, "pass");
+});
+
+Deno.test("source-side created/updated timestamps and lifecycle state", () => {
+  const a = clone(flagA);
+  a.environments.dev.lastModified = 1700000005000;
+  a.deprecated = true;
+  const extra = { ...clone(flagBIdentical), key: "only-in-eu", deprecated: true };
+  const results = compareFlags({ live: [a], archived: [] }, { live: [flagBIdentical], archived: [extra] }, envMap, opts);
+  const r = results.find((x) => x.key === "checkout-v2");
+  assertEquals(r.createdA, new Date(1700000000000).toISOString());
+  assertEquals(r.updatedA, new Date(1700000005000).toISOString()); // max over compared envs
+  assertEquals([r.deprecated, r.archived, r.archivedB], [true, false, false]);
+  const x = results.find((y) => y.key === "only-in-eu");
+  assertEquals([x.createdA, x.updatedA, x.deprecated, x.archived], [null, null, true, true]);
+  // Only the mapped environments count toward "updated".
+  assertEquals(sourceTimes(a, ["prod"]).updatedA, new Date(1700000001000).toISOString());
+  assertEquals(sourceTimes({ environments: {} }, ["prod"]), { createdA: null, updatedA: null });
+});
+
+Deno.test("markdown lists missing flags with source timestamps", () => {
+  const gone = { ...clone(flagA), key: "gone", creationDate: Date.UTC(2026, 9, 16, 9, 12) };
+  const results = compareFlags({ live: [gone], archived: [] }, { live: [], archived: [] }, envMap, opts);
+  const report = {
+    generatedAt: "now", tool: { name: "t", version: "0" },
+    sides: { a: { label: "US", baseUrl: "u", projectKey: "p", envs: ["prod", "dev"] }, b: { label: "EU", baseUrl: "e", projectKey: "p", envs: ["production", "development"] } },
+    envMap, options: opts, flags: results, segments: [], evaluation: [], errors: [],
+  };
+  report.summary = summarize(report, { totalA: 1, totalB: 0 });
+  const md = toMarkdown(report);
+  assertEquals(md.includes("- `gone` — created 2026-10-16 09:12Z, updated 2023-11-14 22:13Z"), true);
+});
+
+Deno.test("rules referencing segments deleted from A: dead ones are info, live ones stay errors", () => {
+  const segRule = (description, clause) => ({ _id: description, description, variation: 0, trackEvents: false, clauses: [{ attribute: "segmentMatch", op: "segmentMatch", ...clause }] });
+  const withRules = (f, envKey, rules) => {
+    const c = clone(f);
+    c.environments[envKey].rules.push(...rules);
+    return c;
+  };
+  const segKeys = new Map([["prod", new Set(["existing"])], ["dev", new Set()]]);
+  // Dead: non-negated, only missing segments. B (correctly) lacks it.
+  const aDead = withRules(flagA, "prod", [segRule("gone-seg", { values: ["deleted"] })]);
+  let [r] = compareFlags({ live: [aDead], archived: [] }, { live: [flagBIdentical], archived: [] }, envMap, opts, segKeys);
+  assertEquals([r.status, r.severity, r.droppedRules], ["identical", "info", 1]);
+  assertEquals(r.environments["prod→production"].map((d) => [d.path, d.kind, d.severity]), [["rules[2]", "droppedInB", "info"]]);
+  assertEquals(r.notes.some((n) => n.includes('"deleted"') && n.includes("does not change evaluation")), true);
+  // Without segment info the old behaviour stays: a rules mismatch error.
+  [r] = compareFlags({ live: [aDead], archived: [] }, { live: [flagBIdentical], archived: [] }, envMap, opts);
+  assertEquals(r.severity, "error");
+  // Live: negated clause, or OR'd with an existing segment. Still an error, with an explanation.
+  const aLive = withRules(flagA, "prod", [segRule("neg", { values: ["deleted"], negate: true }), segRule("mixed", { values: ["deleted", "existing"] })]);
+  [r] = compareFlags({ live: [aLive], archived: [] }, { live: [flagBIdentical], archived: [] }, envMap, opts, segKeys);
+  assertEquals([r.status, r.severity, r.droppedRules], ["differs", "error", 0]);
+  assertEquals(r.notes.filter((n) => n.includes("still live")).length, 2);
+  // If B somehow kept the rule, nothing is reported.
+  const bKept = withRules(flagBIdentical, "production", [segRule("gone-seg", { values: ["deleted"] })]);
+  [r] = compareFlags({ live: [aDead], archived: [] }, { live: [bKept], archived: [] }, envMap, opts, segKeys);
+  assertEquals([r.status, r.severity, r.droppedRules], ["identical", "none", 0]);
+});
+
+Deno.test("missingSegmentRules classifies dead and live rules", () => {
+  const keys = new Set(["ok"]);
+  const rules = [
+    { clauses: [{ op: "in", attribute: "country", values: ["DE"] }] },
+    { description: "dead", clauses: [{ op: "segmentMatch", values: ["x", "y"] }] },
+    { description: "and-dead", clauses: [{ op: "segmentMatch", values: ["x"], negate: true }, { op: "segmentMatch", values: ["x"] }] },
+    { description: "or-live", clauses: [{ op: "segmentMatch", values: ["x", "ok"] }] },
+  ];
+  assertEquals(missingSegmentRules(rules, keys).map((r) => [r.index, r.dead, r.missing]), [[1, true, ["x", "y"]], [2, true, ["x"]], [3, false, ["x"]]]);
 });

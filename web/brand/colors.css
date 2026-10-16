@@ -1,0 +1,77 @@
+/*
+ * LaunchDarkly Brand Tokens — 2026 Brand Library
+ * Copied verbatim from the launchdarkly-brand-style skill (sa-tools plugin, launchdarkly-labs/ps-agent-skills).
+ *
+ * Usage:
+ *   @import url("path/to/launchdarkly-brand-style/tokens/colors.css");
+ *   body { background: var(--ld-bg); color: var(--ld-text-body); }
+ */
+
+:root {
+  /* Grayscale (8 tones, 2026) */
+  --ld-white:    #FFFFFF;
+  --ld-gray-01:  #F8F8F8;
+  --ld-gray-02:  #D1D6D9;
+  --ld-gray-03:  #A7A9AC;
+  --ld-gray-04:  #6D6E71;
+  --ld-gray-05:  #414042;
+  --ld-gray-06:  #2C2C2C;
+  --ld-black:    #191919;
+
+  /* Base colors (6) */
+  --ld-blue:    #405BFF;
+  --ld-cyan:    #3DD6F5;
+  --ld-lime:    #DDFF46;
+  --ld-purple:  #A34FDE;
+  --ld-pink:    #FF35A2;
+  --ld-orange:  #FF9D29;
+
+  /* Light variants — reserved for data viz / illustration */
+  --ld-blue-light:    #7084FF;
+  --ld-cyan-light:    #6DE0F7;
+  --ld-lime-light:    #EDFF9E;
+  --ld-purple-light:  #B675E4;
+  --ld-pink-light:    #EE5DAC;
+  --ld-orange-light:  #FFB660;
+
+  /* Dark variants — reserved for data viz / illustration */
+  --ld-blue-dark:    #2A3BA6;
+  --ld-cyan-dark:    #238CA3;
+  --ld-lime-dark:    #ADD300;
+  --ld-purple-dark:  #6A3390;
+  --ld-pink-dark:    #C51A77;
+  --ld-orange-dark:  #D57B10;
+
+  /* Named gradients (2026, base colors only — never use Light/Dark in gradients) */
+  --ld-gradient-purple-blue:       linear-gradient(135deg, var(--ld-purple), var(--ld-blue));
+  --ld-gradient-pink-orange-lime:  linear-gradient(135deg, var(--ld-pink), var(--ld-orange), var(--ld-lime));
+  --ld-gradient-purple-pink:       linear-gradient(135deg, var(--ld-purple), var(--ld-pink));
+  --ld-gradient-cyan-blue:         linear-gradient(135deg, var(--ld-cyan), var(--ld-blue));
+  --ld-gradient-cyan-lime:         linear-gradient(135deg, var(--ld-cyan), var(--ld-lime));
+  --ld-gradient-purple-blue-cyan:  linear-gradient(135deg, var(--ld-purple), var(--ld-blue), var(--ld-cyan));
+
+  /* Semantic aliases — dark mode (default per brand) */
+  --ld-bg:            var(--ld-black);
+  --ld-bg-elevated:   var(--ld-gray-06);
+  --ld-text-heading:  var(--ld-white);
+  --ld-text-body:     var(--ld-gray-03);
+  --ld-text-subtle:   var(--ld-gray-04);
+  --ld-border:        var(--ld-gray-05);
+  --ld-link:          var(--ld-blue-light);
+  --ld-accent:        var(--ld-blue);
+
+  /* Font stacks */
+  --ld-font-display:  'Sora', system-ui, -apple-system, sans-serif;
+  --ld-font-body:     'Inter', system-ui, -apple-system, sans-serif;
+}
+
+/* Light-mode overrides — opt in by adding [data-theme="light"] to a parent */
+[data-theme="light"] {
+  --ld-bg:            var(--ld-gray-01);
+  --ld-bg-elevated:   var(--ld-white);
+  --ld-text-heading:  var(--ld-black);
+  --ld-text-body:     var(--ld-gray-05);
+  --ld-text-subtle:   var(--ld-gray-04);
+  --ld-border:        var(--ld-gray-02);
+  --ld-link:          var(--ld-blue);
+}

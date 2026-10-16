@@ -26,7 +26,21 @@ writes, after normalizing away everything server-generated or instance-specific
 | Per environment | `on`, `offVariation`, `fallthrough` (variation or rollout), `rules` (ordered; clauses ordered; `ref` = warning), individual targets (`targets` + `contextTargets` merged into one set per context kind and variation), `prerequisites`, `trackEvents`, `trackEventsFallthrough` |
 | Segments | `name`, `description`, `tags`, `included`/`excluded` + context lists (merged, as sets), rules (clauses, weight, bucketBy, rollout context kind), `unbounded`. Big-segment membership is not exposed via REST and is noted, not compared |
 
+**Rules that reference segments deleted from A.** LaunchDarkly keeps such rules in the source but
+refuses to save them in the target (`unknown segment`), so the migration cannot recreate them. A
+rule with a non-negated `segmentMatch` clause that lists only missing segments can never match, so
+when B lacks it the checker reports it as an **info** finding ("dead rule skipped") with an
+explanation instead of a rules mismatch. Rules that are still live — a negated clause on a missing
+segment (matches every context) or a missing segment OR'd with an existing one — stay errors, with
+a note explaining why B cannot reproduce them.
+
 Status is **fail** on any error-severity finding or fetch error, **warn** on warnings only, **pass** otherwise.
+
+Each flag result also carries source-side context that is reported, not compared: `createdA`
+(the flag's `creationDate` in A) and `updatedA` (the latest `lastModified` among the compared A
+environments; the flag API has no flag-level "last modified", so flag-level edits such as a new
+description do not move it). A flag that is missing in B but was created a few minutes ago is
+usually just newer than the migration run.
 Percentage rollouts are flagged with a note: the bucketing salt differs between instances, so
 individual contexts may land in a different bucket even when the rollout is identical.
 
@@ -58,6 +72,16 @@ deno task sdk-diff --a-project my-project --env-map production:production
 ```
 
 ## Web page
+
+Results show flags by lifecycle state: **Active** (default; deprecated flags included and marked),
+**Deprecated**, **Archived** and **All** (archived flags grouped at the end). Archived flags are
+fetched by default in the web page. Created / updated (A) columns are sortable, and each row links
+to the flag in A and B. The Markdown report lists the same timestamps (UTC) for missing and
+differing flags.
+
+Branding follows the `launchdarkly-brand-style` skill (2026 tokens in `web/brand/colors.css`, logo
+lock-ups in `web/brand/`). Fonts use the brand stacks (Sora, Inter) only when installed locally, so
+the page keeps talking to LaunchDarkly hosts only.
 
 Served from the repository root (`index.html` + `web/` + `lib/`). Run locally with
 `deno task serve` and open http://localhost:8000. The `pages.yml` workflow deploys the same files
