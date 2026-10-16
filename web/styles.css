@@ -5,8 +5,10 @@
   --surface: var(--ld-gray-06);
   --surface-2: #232323;
   --fg: var(--ld-white);
-  --body: var(--ld-gray-03);
-  --muted: var(--ld-gray-04);
+  /* Dark: Gray 02 body / Gray 03 muted keeps small text >= 4.5:1 on Gray 06 surfaces
+     (Gray 04 is only ~2.7:1 there). The skill lists Gray 02 as an alternative body color on dark. */
+  --body: var(--ld-gray-02);
+  --muted: var(--ld-gray-03);
   --line: var(--ld-gray-05);
   --link: var(--ld-blue-light);
   --accent: var(--ld-blue);

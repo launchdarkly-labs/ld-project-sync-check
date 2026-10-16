@@ -132,3 +132,26 @@ Deno.test("missingSegmentRules classifies dead and live rules", () => {
   ];
   assertEquals(missingSegmentRules(rules, keys).map((r) => [r.index, r.dead, r.missing]), [[1, true, ["x", "y"]], [2, true, ["x"]], [3, false, ["x"]]]);
 });
+
+Deno.test("dropped dead rule is recognized even when a surviving rule also differs", () => {
+  const a = clone(flagA);
+  a.environments.prod.rules.push({ _id: "d", description: "gone", variation: 0, clauses: [{ attribute: "segmentMatch", op: "segmentMatch", values: ["deleted"] }] });
+  const b = clone(flagBIdentical);
+  b.environments.production.rules[0].ref = "dach-rule"; // warning-level change on a surviving rule
+  const segKeys = new Map([["prod", new Set()], ["dev", new Set()]]);
+  const [r] = compareFlags({ live: [a], archived: [] }, { live: [b], archived: [] }, envMap, opts, segKeys);
+  assertEquals(r.droppedRules, 1);
+  assertEquals(r.environments["prod→production"].map((d) => [d.path, d.severity]), [["rules[2]", "info"], ["rules[0].ref", "warning"]]);
+  assertEquals([r.status, r.severity], ["differs", "warning"]);
+});
+
+Deno.test("negated clause mixing missing and existing segments is explained precisely", () => {
+  const rules = [
+    { clauses: [{ op: "segmentMatch", values: ["gone"], negate: true }] },
+    { clauses: [{ op: "segmentMatch", values: ["gone", "ok"], negate: true }] },
+  ];
+  const [all, mixed] = missingSegmentRules(rules, new Set(["ok"]));
+  assertEquals([all.dead, mixed.dead], [false, false]);
+  assertEquals(all.why.includes("matches every context"), true);
+  assertEquals(mixed.why.includes("outside the existing ones"), true);
+});

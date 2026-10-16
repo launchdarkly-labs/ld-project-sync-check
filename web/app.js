@@ -158,7 +158,8 @@ function show(report) {
   renderErrors($("#errors"), report.errors);
   $("#results").scrollIntoView({ behavior: "smooth" });
 }
-function applyFilter() {
+/** @param {string} [refocus] selector of a re-rendered control to focus afterwards */
+function applyFilter(refocus) {
   const report = state.report;
   if (!report) return;
   const q = $("#filter").value.trim().toLowerCase();
@@ -171,7 +172,7 @@ function applyFilter() {
     return [...f.flagLevel, ...Object.values(f.environments).flat()].some((e) => e.path.toLowerCase().includes(q));
   });
   const archivedFetched = report.options.includeArchived;
-  renderStateTabs($("#state-tabs"), matching, state.flagState, archivedFetched, (id) => { state.flagState = id; applyFilter(); });
+  renderStateTabs($("#state-tabs"), matching, state.flagState, archivedFetched, (id) => { state.flagState = id; applyFilter(`#state-tabs [data-state="${id}"]`); });
   const rows = matching.filter(inState(state.flagState));
   renderLists($("#lists"), report.flags.filter(inState(state.flagState)));
   renderFlags($("#flags"), {
@@ -179,12 +180,14 @@ function applyFilter() {
     onSort: (key) => {
       const s = state.sort;
       state.sort = s?.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: SORTS[key].firstDir };
-      applyFilter();
+      applyFilter(`#flags th [data-sort="${key}"]`);
     },
   });
+  // Re-rendering replaces the tab and sort buttons; put keyboard focus back on the one used.
+  if (refocus) $(refocus)?.focus();
 }
-$("#filter").addEventListener("input", applyFilter);
-$("#status-filter").addEventListener("change", applyFilter);
+$("#filter").addEventListener("input", () => applyFilter());
+$("#status-filter").addEventListener("change", () => applyFilter());
 
 function download(name, text, type) {
   const url = URL.createObjectURL(new Blob([text], { type }));

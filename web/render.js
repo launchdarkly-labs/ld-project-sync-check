@@ -46,7 +46,7 @@ export function renderStateTabs(container, flags, current, archivedFetched, onSe
     const n = flags.filter(s.test).length;
     const count = s.id === "archived" && !archivedFetched ? "—" : n;
     container.append(el("button", {
-      type: "button", role: "tab", "aria-selected": String(s.id === current),
+      type: "button", role: "tab", "aria-selected": String(s.id === current), "data-state": s.id,
       onclick: () => onSelect(s.id),
     }, s.label, el("span", { class: "c" }, count)));
   }
@@ -213,7 +213,7 @@ export function renderFlags(container, o) {
     const active = sort?.key === key;
     const arrow = active ? (sort.dir === "asc" ? " ↑" : " ↓") : "";
     return el("th", { title, "aria-sort": active ? (sort.dir === "asc" ? "ascending" : "descending") : undefined },
-      el("button", { type: "button", class: `sort${active ? " on" : ""}`, onclick: () => o.onSort(key) }, label, arrow));
+      el("button", { type: "button", class: `sort${active ? " on" : ""}`, "data-sort": key, onclick: () => o.onSort(key) }, label, arrow));
   };
   const COLS = 6;
   const t = el("table", {}, el("thead", {}, el("tr", {},
