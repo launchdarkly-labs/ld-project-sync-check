@@ -22,7 +22,7 @@ writes, after normalizing away everything server-generated or instance-specific
 | Scope | Compared (error unless noted) |
 |---|---|
 | Project | Flag keys (missing in B = error, only in B = info), segment keys per environment pair |
-| Flag level | `kind`, `name`, `description`, `temporary`, `tags` (as a set), `variations` (ordered: value, name, description), `defaults`, `archived`, `deprecated`, `clientSideAvailability` (`includeInSnippet` folded in; `usingMobileKey` mismatch = warning), `customProperties`; warning: `deprecatedDate`, `variationJsonSchema`; info: maintainer email (only with `--compare-maintainers`), maintainer team, experiments, `goalIds`, `viewKeys`, migration-flag settings |
+| Flag level | `kind`, `name`, `description`, `temporary`, `tags` (as a set), `variations` (ordered: value, name, description), `defaults`, `archived`, `deprecated`, `clientSideAvailability` (`includeInSnippet` folded in; `usingMobileKey` mismatch = warning), `customProperties`; warning: `variationJsonSchema`; info: `deprecatedDate` (stamped by the API, always differs), maintainer email (only with `--compare-maintainers`), maintainer team, experiments, `goalIds`, `viewKeys`, migration-flag settings |
 | Per environment | `on`, `offVariation`, `fallthrough` (variation or rollout), `rules` (ordered; clauses ordered; `ref` = warning), individual targets (`targets` + `contextTargets` merged into one set per context kind and variation), `prerequisites`, `trackEvents`, `trackEventsFallthrough` |
 | Segments | `name`, `description`, `tags`, `included`/`excluded` + context lists (merged, as sets), rules (clauses, weight, bucketBy, rollout context kind), `unbounded`. Big-segment membership is not exposed via REST and is noted, not compared |
 
