@@ -1,6 +1,6 @@
 import { assertEquals } from "@std/assert";
 import { compareFlags, compareSegments, missingSegmentRules, sourceTimes } from "../lib/compare.js";
-import { summarize, toMarkdown } from "../lib/report.js";
+import { listFindings, summarize, toMarkdown } from "../lib/report.js";
 import { flagA, flagBIdentical, segmentA, segmentBIdentical } from "./fixtures/flags.js";
 
 const envMap = [{ a: "prod", b: "production" }, { a: "dev", b: "development" }];
@@ -154,4 +154,17 @@ Deno.test("negated clause mixing missing and existing segments is explained prec
   assertEquals([all.dead, mixed.dead], [false, false]);
   assertEquals(all.why.includes("matches every context"), true);
   assertEquals(mixed.why.includes("outside the existing ones"), true);
+});
+
+Deno.test("listFindings has one entry per counted finding", () => {
+  const b = clone(flagBIdentical);
+  b.environments.production.rules[0].clauses[0].values = ["DE", "CH"];
+  b.environments.production.rules[0].ref = "dach-rule";
+  const results = compareFlags({ live: [flagA, { ...clone(flagA), key: "gone" }], archived: [] }, { live: [b], archived: [] }, envMap, opts);
+  const report = { flags: results, segments: [], errors: [] };
+  const findings = listFindings(report);
+  const counts = summarize(report).counts;
+  for (const sev of ["error", "warning", "info"]) assertEquals(findings.filter((x) => x.severity === sev).length, counts[sev]);
+  assertEquals(findings.find((x) => x.key === "gone"), { severity: "error", kind: "flag", key: "gone", where: "", message: "missing in B" });
+  assertEquals(findings.some((x) => x.key === "checkout-v2" && x.where === "prod→production" && x.path === "rules[0].clauses[0].values[1]"), true);
 });

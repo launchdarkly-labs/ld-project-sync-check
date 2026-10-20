@@ -1,7 +1,7 @@
 import { makeClient } from "../lib/ld_api.js";
 import { compareProjects } from "../lib/compare.js";
-import { toMarkdown } from "../lib/report.js";
-import { el, inState, renderErrors, renderFlags, renderLists, renderSegments, renderStateTabs, renderStatus, renderSummary, SORTS } from "./render.js";
+import { listFindings, toMarkdown } from "../lib/report.js";
+import { el, inState, renderErrors, renderFindings, renderFlags, renderLists, renderSegments, renderStateTabs, renderStatus, renderSummary, SORTS } from "./render.js";
 
 const $ = (sel) => document.querySelector(sel);
 const form = $("#form");
@@ -144,7 +144,12 @@ const labelFor = (u) => (u.includes(".eu.") ? "EU" : u.includes("launchdarkly.co
 
 function show(report) {
   $("#results").hidden = false;
-  renderStatus($("#status"), report);
+  renderStatus($("#status"), report, (sev) => {
+    const d = $(`#findings details[data-sev="${sev}"]`);
+    d.open = !d.open;
+    if (d.open) d.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  });
+  renderFindings($("#findings"), listFindings(report));
   renderSummary($("#summary"), report, (status) => {
     $("#status-filter").value = $("#status-filter").value === status ? "" : status;
     if (status === "extraInB" || status === "missingInB") state.flagState = "all";

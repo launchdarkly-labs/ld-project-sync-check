@@ -1,5 +1,7 @@
 // DOM builders. Everything from the API goes through textContent, never innerHTML.
 
+import { SEVERITIES } from "../lib/severity.js";
+
 export const el = (tag, attrs = {}, ...children) => {
   const n = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
@@ -52,14 +54,22 @@ export function renderStateTabs(container, flags, current, archivedFetched, onSe
   }
 }
 
-export function renderStatus(container, report) {
+const SEV_LABEL = { error: "errors", warning: "warnings", info: "info" };
+
+/** Counts with findings are buttons; onCount(severity) opens that list in the findings panel. */
+export function renderStatus(container, report, onCount = () => {}) {
   const s = report.summary;
   container.textContent = "";
   container.className = `status ${s.status}`;
+  const count = (sev) => {
+    const text = `${s.counts[sev]} ${SEV_LABEL[sev]}`;
+    if (!s.counts[sev]) return text;
+    return el("button", { type: "button", class: `count-link${sev === "error" ? " strong" : ""}`, title: `Show ${SEV_LABEL[sev]}`, onclick: () => onCount(sev) }, text);
+  };
   container.append(
     el("span", { class: "verdict" }, s.status.toUpperCase()),
     el("span", { class: "meta" },
-      el("strong", {}, `${s.counts.error} errors`), ` · ${s.counts.warning} warnings · ${s.counts.info} info`,
+      count("error"), " · ", count("warning"), " · ", count("info"),
       el("br"),
       `${report.sides.a.projectKey} (${report.sides.a.label}) → ${report.sides.b.projectKey} (${report.sides.b.label}) · ${new Date(report.generatedAt).toLocaleString()}`),
   );
@@ -116,6 +126,32 @@ export function renderSummary(container, report, onPick = () => {}) {
         el("div", { class: "tile-n" }, g.identical, el("span", { class: "unit" }, ` / ${g.a} identical`)),
         el("div", { class: "tile-sub" }, issues.length ? issues.join(" · ") : "all in sync"));
     }))));
+  }
+}
+
+/**
+ * Every finding behind the status counts, one collapsible list per severity. Each list is a
+ * <details data-sev="…">; renderStatus' count buttons open them.
+ */
+export function renderFindings(container, findings) {
+  container.textContent = "";
+  for (const sev of SEVERITIES) {
+    const items = findings.filter((x) => x.severity === sev);
+    if (!items.length) continue;
+    const t = el("table", { class: "diff" }, el("thead", {}, el("tr", {}, el("th", {}, "Item"), el("th", {}, "Where"), el("th", {}, "Path"), el("th", {}, "A"), el("th", {}, "B"))));
+    const body = el("tbody");
+    for (const x of items) {
+      const diff = x.path !== undefined
+        ? [el("td", {}, el("code", {}, x.path)), el("td", {}, el("code", {}, show(x.a))), el("td", {}, el("code", {}, show(x.b)))]
+        : [el("td", { colspan: 3 }, badge(x.message === "missing in B" ? "missingInB" : "extraInB"))];
+      body.append(el("tr", {},
+        el("td", { class: "key" }, x.key, el("span", { class: "chip" }, x.kind)),
+        el("td", {}, x.where || "—"),
+        diff));
+    }
+    t.append(body);
+    container.append(el("details", { class: `findings ${sev}`, "data-sev": sev },
+      el("summary", {}, badge(sev), ` ${items.length} ${SEV_LABEL[sev]}`), el("div", { class: "findings-body" }, t)));
   }
 }
 
