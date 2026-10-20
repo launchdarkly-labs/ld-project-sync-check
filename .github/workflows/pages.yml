@@ -22,8 +22,8 @@ jobs:
         run: |
           mkdir -p site/web site/lib
           cp index.html site/
-          cp web/* site/web/
-          cp lib/* site/lib/
+          cp -R web/. site/web/
+          cp -R lib/. site/lib/
           touch site/.nojekyll
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
