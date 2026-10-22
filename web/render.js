@@ -285,11 +285,26 @@ export function renderFlags(container, o) {
 export function renderSegments(container, segments) {
   container.textContent = "";
   if (!segments.length) { container.append(el("p", { class: "empty" }, "No segments in the compared environments.")); return; }
-  const t = el("table", {}, el("thead", {}, el("tr", {}, el("th", {}, "Segment"), el("th", {}, "Environments"), el("th", {}, "Result"), el("th", {}, "Severity"))));
+  const t = el("table", {}, el("thead", {}, el("tr", {},
+    el("th", {}, "Segment"),
+    el("th", {}, "Environments"),
+    el("th", {}, "Result"),
+    el("th", {}, "Severity"),
+    el("th", { title: "When the segment was created in the source environment" }, "Created (A)"),
+    el("th", { title: "Last change to the segment in the source environment" }, "Updated (A)"),
+  )));
   const body = el("tbody");
+  const timeCell = (iso) => el("td", { class: `time${isRecent(iso) ? " recent" : ""}`, title: fullTime(iso) }, iso ? relTime(iso) : "—");
   for (const s of segments) {
     const detail = el("div", { class: "detail" }, s.diffs.length ? diffTable(s.diffs) : el("p", { class: "notes" }, "No differences."), s.notes.length ? el("ul", { class: "notes" }, s.notes.map((n) => el("li", {}, n))) : null);
-    body.append(...expandable([el("td", { class: "key" }, s.key), el("td", {}, `${s.envA} → ${s.envB}`), el("td", {}, badge(s.status)), el("td", {}, badge(s.severity))], 4, detail));
+    body.append(...expandable([
+      el("td", { class: "key" }, s.key),
+      el("td", {}, `${s.envA} → ${s.envB}`),
+      el("td", {}, badge(s.status)),
+      el("td", {}, badge(s.severity)),
+      s.status === "extraInB" ? el("td", { class: "time muted" }, "—") : timeCell(s.createdA),
+      s.status === "extraInB" ? el("td", { class: "time muted" }, "—") : timeCell(s.updatedA),
+    ], 6, detail));
   }
   t.append(body);
   container.append(t);

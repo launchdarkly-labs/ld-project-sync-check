@@ -46,8 +46,9 @@ Deno.test("missing and extra flags, summary status and markdown", () => {
   const extra = { ...clone(flagBIdentical), key: "only-in-eu" };
   const results = compareFlags({ live: [flagA, { ...clone(flagA), key: "gone" }], archived: [] }, { live: [flagBIdentical, extra], archived: [] }, envMap, opts);
   assertEquals(results.map((r) => [r.key, r.status]), [["gone", "missingInB"], ["only-in-eu", "extraInB"], ["checkout-v2", "identical"]]);
-  const segments = compareSegments([segmentA], [segmentBIdentical], envMap[0], opts);
+  const segments = compareSegments([{ ...segmentA, lastModifiedDate: Date.UTC(2026, 9, 20) }], [segmentBIdentical], envMap[0], opts);
   assertEquals(segments[0].status, "identical");
+  assertEquals([segments[0].createdA, segments[0].updatedA], ["1970-01-01T00:00:00.001Z", "2026-10-20T00:00:00.000Z"]);
   const report = {
     generatedAt: "now", tool: { name: "t", version: "0" },
     sides: { a: { label: "US", baseUrl: "https://app.launchdarkly.com", projectKey: "p", envs: ["prod", "dev"] }, b: { label: "EU", baseUrl: "https://app.eu.launchdarkly.com", projectKey: "p", envs: ["production", "development"] } },

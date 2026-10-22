@@ -21,7 +21,7 @@ function persist() {
   try {
     if (!form.elements.remember.checked) { sessionStorage.removeItem(KEY); return; }
     const data = {};
-    for (const k of ["a-host", "a-project", "a-token", "b-host", "b-project", "b-token", "key-prefix"]) data[k] = form.elements[k].value;
+    for (const k of ["a-host", "a-project", "a-token", "b-host", "b-project", "b-token"]) data[k] = form.elements[k].value;
     sessionStorage.setItem(KEY, JSON.stringify(data));
   } catch { /* ignore */ }
 }
@@ -33,6 +33,31 @@ $("#forget").addEventListener("click", () => {
 });
 form.addEventListener("change", persist);
 restore();
+
+// --- check options persistence (no secrets, so localStorage across reloads and tabs) ---
+const OPTS_KEY = "ld-sync-check-options";
+const OPTION_FIELDS = ["include-archived", "compare-maintainers", "strict-extra", "key-prefix"];
+function restoreOptions() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(OPTS_KEY) ?? "null");
+    if (!saved) return;
+    for (const k of OPTION_FIELDS) {
+      const f = form.elements[k];
+      if (!(k in saved)) continue;
+      if (f.type === "checkbox") f.checked = Boolean(saved[k]);
+      else f.value = String(saved[k]);
+    }
+  } catch { /* storage unavailable */ }
+}
+function persistOptions() {
+  try {
+    const data = {};
+    for (const k of OPTION_FIELDS) { const f = form.elements[k]; data[k] = f.type === "checkbox" ? f.checked : f.value; }
+    localStorage.setItem(OPTS_KEY, JSON.stringify(data));
+  } catch { /* ignore */ }
+}
+form.addEventListener("change", persistOptions);
+restoreOptions();
 
 // --- connect: validate token, load environments ---
 function clientFor(side) {
