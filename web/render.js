@@ -181,6 +181,7 @@ function flagDetail(f, sides) {
   const meta = el("div", { class: "detail-meta" });
   if (f.createdA) meta.append(el("span", {}, `Created in A ${fullTime(f.createdA)}`));
   if (f.updatedA) meta.append(el("span", { title: "Latest targeting change among the compared A environments" }, `Last changed ${fullTime(f.updatedA)} (compared envs)`));
+  if (f.updatedB) meta.append(el("span", { title: "Latest targeting change among the compared B environments" }, `Last changed in B ${fullTime(f.updatedB)}`));
   if (f.status !== "extraInB") meta.append(extLink(flagUrl(sides.a, f.key), "Open in A ↗"));
   if (f.status !== "missingInB") meta.append(extLink(flagUrl(sides.b, f.keyB), "Open in B ↗"));
   d.append(meta);
@@ -220,6 +221,7 @@ export const SORTS = {
   key: { cmp: (x, y) => x.key.localeCompare(y.key), firstDir: "asc" },
   created: { cmp: (x, y) => ts(x.createdA) - ts(y.createdA), firstDir: "desc" },
   updated: { cmp: (x, y) => ts(x.updatedA) - ts(y.updatedA), firstDir: "desc" },
+  updatedB: { cmp: (x, y) => ts(x.updatedB) - ts(y.updatedB), firstDir: "desc" },
 };
 
 /**
@@ -251,13 +253,14 @@ export function renderFlags(container, o) {
     return el("th", { title, "aria-sort": active ? (sort.dir === "asc" ? "ascending" : "descending") : undefined },
       el("button", { type: "button", class: `sort${active ? " on" : ""}`, "data-sort": key, onclick: () => o.onSort(key) }, label, arrow));
   };
-  const COLS = 6;
+  const COLS = 7;
   const t = el("table", {}, el("thead", {}, el("tr", {},
     th("Flag key", "key"),
     th("Result"),
     th("Severity"),
     th("Created (A)", "created", "When the flag was created in the source project"),
     th("Updated (A)", "updated", "Latest targeting change among the compared source environments"),
+    th("Updated (B)", "updatedB", "Latest targeting change among the compared target environments. A change here after the migration means the flag was edited in B"),
     th("Findings"),
   )));
   const body = el("tbody");
@@ -275,6 +278,7 @@ export function renderFlags(container, o) {
       el("td", {}, badge(f.severity)),
       f.status === "extraInB" ? el("td", { class: "time muted" }, "—") : timeCell(f.createdA),
       f.status === "extraInB" ? el("td", { class: "time muted" }, "—") : timeCell(f.updatedA),
+      f.status === "missingInB" ? el("td", { class: "time muted" }, "—") : timeCell(f.updatedB),
       el("td", {}, n ? `${n} field(s)` : "", f.notes.length ? `${n ? " · " : ""}${f.notes.length} note(s)` : ""),
     ], COLS, flagDetail(f, sides)));
   }
@@ -292,6 +296,7 @@ export function renderSegments(container, segments) {
     el("th", {}, "Severity"),
     el("th", { title: "When the segment was created in the source environment" }, "Created (A)"),
     el("th", { title: "Last change to the segment in the source environment" }, "Updated (A)"),
+    el("th", { title: "Last change to the segment in the target environment. A change here after the migration means the segment was edited in B" }, "Updated (B)"),
   )));
   const body = el("tbody");
   const timeCell = (iso) => el("td", { class: `time${isRecent(iso) ? " recent" : ""}`, title: fullTime(iso) }, iso ? relTime(iso) : "—");
@@ -304,7 +309,8 @@ export function renderSegments(container, segments) {
       el("td", {}, badge(s.severity)),
       s.status === "extraInB" ? el("td", { class: "time muted" }, "—") : timeCell(s.createdA),
       s.status === "extraInB" ? el("td", { class: "time muted" }, "—") : timeCell(s.updatedA),
-    ], 6, detail));
+      s.status === "missingInB" ? el("td", { class: "time muted" }, "—") : timeCell(s.updatedB),
+    ], 7, detail));
   }
   t.append(body);
   container.append(t);

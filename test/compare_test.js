@@ -46,9 +46,9 @@ Deno.test("missing and extra flags, summary status and markdown", () => {
   const extra = { ...clone(flagBIdentical), key: "only-in-eu" };
   const results = compareFlags({ live: [flagA, { ...clone(flagA), key: "gone" }], archived: [] }, { live: [flagBIdentical, extra], archived: [] }, envMap, opts);
   assertEquals(results.map((r) => [r.key, r.status]), [["gone", "missingInB"], ["only-in-eu", "extraInB"], ["checkout-v2", "identical"]]);
-  const segments = compareSegments([{ ...segmentA, lastModifiedDate: Date.UTC(2026, 9, 20) }], [segmentBIdentical], envMap[0], opts);
+  const segments = compareSegments([{ ...segmentA, lastModifiedDate: Date.UTC(2026, 9, 20) }], [{ ...segmentBIdentical, lastModifiedDate: Date.UTC(2026, 9, 22) }], envMap[0], opts);
   assertEquals(segments[0].status, "identical");
-  assertEquals([segments[0].createdA, segments[0].updatedA], ["1970-01-01T00:00:00.001Z", "2026-10-20T00:00:00.000Z"]);
+  assertEquals([segments[0].createdA, segments[0].updatedA, segments[0].updatedB], ["1970-01-01T00:00:00.001Z", "2026-10-20T00:00:00.000Z", "2026-10-22T00:00:00.000Z"]);
   const report = {
     generatedAt: "now", tool: { name: "t", version: "0" },
     sides: { a: { label: "US", baseUrl: "https://app.launchdarkly.com", projectKey: "p", envs: ["prod", "dev"] }, b: { label: "EU", baseUrl: "https://app.eu.launchdarkly.com", projectKey: "p", envs: ["production", "development"] } },
@@ -70,10 +70,14 @@ Deno.test("source-side created/updated timestamps and lifecycle state", () => {
   a.environments.dev.lastModified = 1700000005000;
   a.deprecated = true;
   const extra = { ...clone(flagBIdentical), key: "only-in-eu", deprecated: true };
-  const results = compareFlags({ live: [a], archived: [] }, { live: [flagBIdentical], archived: [extra] }, envMap, opts);
+  const b = clone(flagBIdentical);
+  b.environments.development.lastModified = 1700000009000;
+  b.environments.unmapped = { lastModified: 1800000000000 };
+  const results = compareFlags({ live: [a], archived: [] }, { live: [b], archived: [extra] }, envMap, opts);
   const r = results.find((x) => x.key === "checkout-v2");
   assertEquals(r.createdA, new Date(1700000000000).toISOString());
   assertEquals(r.updatedA, new Date(1700000005000).toISOString()); // max over compared envs
+  assertEquals(r.updatedB, new Date(1700000009000).toISOString()); // max over mapped B envs only
   assertEquals([r.deprecated, r.archived, r.archivedB], [true, false, false]);
   const x = results.find((y) => y.key === "only-in-eu");
   assertEquals([x.createdA, x.updatedA, x.deprecated, x.archived], [null, null, true, true]);
