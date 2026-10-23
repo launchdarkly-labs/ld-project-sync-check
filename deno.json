@@ -1,6 +1,6 @@
 {
   "name": "ld-project-sync-check",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Compare two LaunchDarkly projects (e.g. US vs EU instance) field by field and report whether they are in sync.",
   "license": "Apache-2.0",
   "exports": "./lib/compare.js",
