@@ -308,3 +308,18 @@ Deno.test("conflicts of a dry run's record are not taken as source changes", () 
   const out = annotateWithManifest(reportFor(flagA, b), manifestFor(), runFor({ dryRun: true, startedAt: "2026-10-23T08:00:00.000Z", conflicts }));
   assertEquals(out.flags[0].sync.environments["prod→production"], "editedInTarget");
 });
+
+Deno.test("a copy migrate could not read back is judged against its own dest.since", () => {
+  const m = manifestFor({ dest: { since: Date.parse("2026-10-23T09:00:00Z") } });
+  const b = offInEu();
+  // Modified after the last sync but before the run's own write: not an edit in B
+  b.environments.production.lastModified = Date.parse("2026-10-23T08:00:00Z");
+  assertEquals(annotateWithManifest(reportFor(flagA, b), m).flags[0].sync.environments["prod→production"], "inSync");
+  b.environments.production.lastModified = Date.parse("2026-10-23T10:00:00Z");
+  assertEquals(annotateWithManifest(reportFor(flagA, b), m).flags[0].sync.environments["prod→production"], "editedInTarget");
+  const seg = manifestFor();
+  seg.segments.prod["beta-users"].dest = { since: Date.parse("2026-10-23T09:00:00Z") };
+  const segB = { ...clone(segmentBIdentical), description: "differs", lastModifiedDate: Date.parse("2026-10-23T08:00:00Z") };
+  assertEquals(annotateWithManifest(reportFor(flagA, flagBIdentical, { segB }), seg).segments[0].sync.state, "inSync");
+  assertThrows(() => parseManifest(manifestFor({ dest: { since: "x" } })), Error, "dest.since");
+});
