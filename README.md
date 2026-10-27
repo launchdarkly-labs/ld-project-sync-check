@@ -44,6 +44,50 @@ usually just newer than the migration run.
 Percentage rollouts are flagged with a note: the bucketing salt differs between instances, so
 individual contexts may land in a different bucket even when the rollout is identical.
 
+## Sync state (with the migration's manifest)
+
+During a migration the projects keep changing: the source until it is frozen, the target once teams
+start working there. Given the sync manifest of [ld-migration-scripts](https://github.com/launchdarkly-labs/ld-migration-scripts)
+(`data/launchdarkly-migrations/sync-manifest-<source>-<dest>.json`), and optionally the run record of
+its last run (`runs/<source>/<dest>/latest.json`, ld-migration-scripts ≥ 3.6.0), the checker labels
+every difference with why it exists:
+
+| State | Meaning | Severity |
+|---|---|---|
+| `pendingSource` | Changed in A after the last sync (or created since); the next sync applies it | info |
+| `editedInTarget` | Changed or deleted in B after the last sync. The migration never overwrites such edits, so it stays different by design | info |
+| `conflict` | Changed on both sides; the source change will not be applied, resolve it in B if needed | warning |
+| `cutOver` | The environment pair is no longer in the last run's environment mapping (it was cut over) | info |
+| `untracked` | Not in the manifest (never migrated) | unchanged |
+| `inSync` | Neither side changed since the last sync: the difference is unexplained | unchanged |
+
+So after a cutover, **pass** means "nothing unexpected", not "identical". Flags and segments are
+paired by the destination keys the manifest records (conflict-prefixed copies included, whose
+prefixed name is expected), so
+`--key-prefix` is not needed. The report gains a `sync` block (last sync, last run, counts per
+state, cut-over environments, warnings) and a `sync` state on each flag and segment result; the
+Markdown report a "Sync state" section.
+
+The comparison is by version: a B version change counts as `editedInTarget` even if it changed
+nothing the migration writes, while the migration itself protects only real content edits.
+Manifests written before ld-migration-scripts 3.6.0 have no record of the destination state; then a
+B environment or segment counts as edited when it was modified after the last sync.
+
+```bash
+deno task check --a-project my-project \
+  --manifest ../ld-migration-scripts/data/launchdarkly-migrations/sync-manifest-my-project-my-project.json \
+  --run-record ../ld-migration-scripts/data/launchdarkly-migrations/runs/my-project/my-project/latest.json
+```
+
+With `--run-record` and no `--env-map`, the run's environment mapping is used. In a `--config` file
+the keys are `manifest` and `runRecord`. The CLI refuses a manifest written for other projects,
+another destination instance or (when the manifest records it) another destination account (its
+versions say nothing about this check), and ignores a run record
+that belongs to a different manifest. A dry run's record (or one whose run did not write the
+manifest) is shown, but its environment mapping is not used. Entries whose last sync failed have no
+baseline and keep their findings. A recorded flag or segment deleted in B while A changed since
+is a `conflict`.
+
 ## CLI
 
 Requires [Deno](https://deno.com) 2.x. Tokens come from environment variables; nothing is written to disk except reports.
@@ -60,8 +104,9 @@ deno task check \
 ```
 
 Options: `--b-project` (defaults to `--a-project`), `--a-label/--b-label`, `--compare-maintainers`,
-`--strict-extra`, `--key-prefix`, `--out dir`, `--fail-on warn`, `--config file.json` (same options
-in camelCase). Exit codes: `0` pass, `1` fail, `2` warnings only.
+`--strict-extra`, `--key-prefix`, `--manifest`, `--run-record` (see [Sync state](#sync-state-with-the-migrations-manifest)),
+`--out dir`, `--fail-on warn`, `--config file.json` (same options in camelCase). Exit codes: `0`
+pass, `1` fail, `2` warnings only.
 
 ```bash
 # What else lives in the source project that the migration does not carry?

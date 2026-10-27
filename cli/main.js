@@ -9,10 +9,11 @@
 import { HOSTS, makeClient } from "../lib/ld_api.js";
 import { compareProjects } from "../lib/compare.js";
 import { toMarkdown } from "../lib/report.js";
+import { annotateWithManifest, destKeysFromManifest, manifestMismatch, parseManifest, parseRunRecord, runRecordMismatch, runRecordWroteManifest } from "../lib/manifest.js";
 import { loadConfig, parse, parseEnvMap, pick, progressPrinter, stderr, writeOut } from "./_common.js";
 
 const args = parse({
-  string: ["a-url", "b-url", "a-project", "b-project", "a-label", "b-label", "env-map", "key-prefix", "out", "config", "fail-on", "token-a", "token-b"],
+  string: ["a-url", "b-url", "a-project", "b-project", "a-label", "b-label", "env-map", "key-prefix", "out", "config", "fail-on", "token-a", "token-b", "manifest", "run-record"],
   boolean: ["help", "include-archived", "compare-maintainers", "strict-extra", "quiet"],
   default: { out: "out", "fail-on": "error" },
 });
@@ -28,6 +29,11 @@ if (args.help) {
   --compare-maintainers       Compare maintainer emails (info severity)
   --strict-extra              Flags only present in B count as errors
   --key-prefix <p>            Expect B keys to be <p> + A key (conflict-prefix migrations)
+  --manifest <file>           Sync manifest from ld-migration-scripts: pairs keys as recorded and labels
+                              each difference (waiting for the next sync, changed in B after the last
+                              sync, conflict, ...); expected differences become info
+  --run-record <file>         Run record of the last migrate run (runs/<src>/<dst>/latest.json): last
+                              run details, and environments no longer synced count as cut over
   --out <dir>                 Output directory (default: out)
   --fail-on error|warn        Exit 1 on warnings too
 Tokens: LD_TOKEN_A / LD_TOKEN_B environment variables (or tokenA/tokenB in --config).`);
@@ -48,7 +54,56 @@ const log = args.quiet ? () => {} : (s) => stderr(`\n${s}\n`);
 const clientA = makeClient({ baseUrl: aUrl, token: tokenA, log });
 const clientB = makeClient({ baseUrl: bUrl, token: tokenB, log });
 
+const readJson = async (path, what) => {
+  try {
+    return JSON.parse(await Deno.readTextFile(path));
+  } catch (err) {
+    fail(`could not read ${what} ${path}: ${err.message}`);
+  }
+};
+const manifestPath = args.manifest ?? cfg.manifest;
+const runRecordPath = args["run-record"] ?? cfg.runRecord;
+let manifest = null, runRecord = null;
+const syncWarnings = [];
+try {
+  if (manifestPath) {
+    const parsed = parseManifest(await readJson(manifestPath, "sync manifest"));
+    manifest = parsed.manifest;
+    syncWarnings.push(...parsed.warnings);
+  }
+  if (runRecordPath) {
+    const parsed = parseRunRecord(await readJson(runRecordPath, "run record"));
+    runRecord = parsed.run;
+    syncWarnings.push(...parsed.warnings);
+  }
+} catch (err) {
+  fail(err.message);
+}
+if (runRecord && !manifest) fail("--run-record needs --manifest");
+if (manifest) {
+  // A manifest for other projects would pair the wrong keys and relabel real drift as expected
+  const mismatch = manifestMismatch(manifest, { projectA, projectB, baseUrlB: bUrl });
+  if (mismatch) fail(`${mismatch} Pass the manifest of this migration`);
+  // Project keys repeat across accounts on one instance: check the account too, when both are known
+  if (manifest.destAccountId) {
+    const accountB = await clientB.callerIdentity().then((who) => who?.accountId, (err) => {
+      syncWarnings.push(`Could not read side B's account (${err.message}); the manifest's account ${manifest.destAccountId} is not checked.`);
+      return undefined;
+    });
+    if (accountB && accountB !== manifest.destAccountId) {
+      fail(`The manifest was written for account ${manifest.destAccountId}, side B's token belongs to ${accountB}. Pass the manifest of this migration`);
+    }
+  }
+}
+if (runRecord && runRecordMismatch(runRecord, manifest)) {
+  // Dropped before its environment mapping can narrow the comparison
+  syncWarnings.push(runRecordMismatch(runRecord, manifest));
+  runRecord = null;
+}
+
 let envMap = parseEnvMap(args["env-map"]) ?? (Array.isArray(cfg.envMap) ? cfg.envMap : parseEnvMap(cfg.envMap));
+// The run's mapping is the natural default when a run record is given
+if (!envMap && runRecord && runRecordWroteManifest(runRecord)) envMap = Object.entries(runRecord.envMap).map(([a, b]) => ({ a, b }));
 if (!envMap) {
   const [ea, eb] = await Promise.all([clientA.listEnvironments(projectA), clientB.listEnvironments(projectB)]);
   const bKeys = new Set(eb.map((e) => e.key));
@@ -57,7 +112,7 @@ if (!envMap) {
   if (!envMap.length) fail("No common environments; pass --env-map");
 }
 
-const report = await compareProjects({
+let report = await compareProjects({
   clientA, clientB, projectA, projectB, envMap,
   labels: { a: args["a-label"] ?? cfg.aLabel ?? "US", b: args["b-label"] ?? cfg.bLabel ?? "EU" },
   options: {
@@ -67,7 +122,12 @@ const report = await compareProjects({
     keyPrefix: args["key-prefix"] ?? cfg.keyPrefix ?? "",
   },
   onProgress: args.quiet ? () => {} : progressPrinter(),
+  destKeys: manifest ? destKeysFromManifest(manifest) : null,
 });
+if (manifest) {
+  report = annotateWithManifest(report, manifest, runRecord);
+  report.sync.warnings.unshift(...syncWarnings);
+}
 
 const stamp = report.generatedAt.replace(/[:.]/g, "-");
 const jsonPath = await writeOut(args.out, `report-${stamp}.json`, JSON.stringify(report, null, 2));
@@ -82,6 +142,11 @@ for (const [env, g] of Object.entries(s.segments)) {
   console.log(`Segments ${env}: A ${g.a}  B ${g.b}  identical ${g.identical}  differing ${g.differing}  missing-in-B ${g.missingInB}  extra-in-B ${g.extraInB}`);
 }
 console.log(`Findings: ${s.counts.error} error, ${s.counts.warning} warning, ${s.counts.info} info${report.errors.length ? `; ${report.errors.length} fetch error(s)` : ""}`);
+if (report.sync) {
+  const c = report.sync.counts.flags;
+  console.log(`Sync    last sync ${report.sync.manifest.lastSyncTimestamp ?? "unknown"}; flags: ${Object.entries(c).map(([k, v]) => `${k} ${v}`).join("  ") || "none"}`);
+  for (const w of report.sync.warnings) console.log(`        ⚠ ${w}`);
+}
 console.log(`Report: ${mdPath}\n        ${jsonPath}`);
 
 if (s.status === "fail") Deno.exit(1);
