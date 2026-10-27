@@ -323,3 +323,23 @@ Deno.test("a copy migrate could not read back is judged against its own dest.sin
   assertEquals(annotateWithManifest(reportFor(flagA, flagBIdentical, { segB }), seg).segments[0].sync.state, "inSync");
   assertThrows(() => parseManifest(manifestFor({ dest: { since: "x" } })), Error, "dest.since");
 });
+
+Deno.test("an environment the manifest never synced for the flag keeps its findings", () => {
+  const b = clone(flagBIdentical);
+  b.environments.development.on = !b.environments.development.on;
+  let out = annotateWithManifest(reportFor(flagA, b), manifestFor());
+  assertEquals([out.flags[0].sync.environments["dev→development"], out.flags[0].severity], ["untracked", "error"]);
+  // and a deleted copy is no conflict just because dev has no recorded version
+  out = annotateWithManifest(reportFor(flagA, null), manifestFor());
+  assertEquals(out.flags[0].sync.state, "editedInTarget");
+});
+
+Deno.test("an edit in a cut-over environment keeps the flag level as it is", () => {
+  const run = runFor({ envMap: { dev: "development" } });
+  const a = { ...clone(flagA), version: 13, description: "changed in US" };
+  const b = offInEu();
+  b.environments.production.version = 3;
+  const flags = compareFlags({ live: [a], archived: [] }, { live: [b], archived: [] }, envMap, opts);
+  const out = annotateWithManifest({ ...reportFor(flagA, b), flags }, manifestFor(), run);
+  assertEquals([out.flags[0].sync.environments["prod→production"], out.flags[0].sync.flagLevel], ["cutOver", "conflict"]);
+});
