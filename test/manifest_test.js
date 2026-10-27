@@ -309,8 +309,9 @@ Deno.test("conflicts of a dry run's record are not taken as source changes", () 
   assertEquals(out.flags[0].sync.environments["prod→production"], "editedInTarget");
 });
 
-Deno.test("a copy migrate could not read back is judged against its own dest.since", () => {
-  const m = manifestFor({ dest: { since: Date.parse("2026-10-23T09:00:00Z") } });
+Deno.test("what migrate could not read back is judged against its own since", () => {
+  // Flags: per destination environment, with no version recorded there
+  const m = manifestFor({ dest: { version: 1, environments: { production: { since: Date.parse("2026-10-23T09:00:00Z") } } } });
   const b = offInEu();
   // Modified after the last sync but before the run's own write: not an edit in B
   b.environments.production.lastModified = Date.parse("2026-10-23T08:00:00Z");
@@ -321,6 +322,7 @@ Deno.test("a copy migrate could not read back is judged against its own dest.sin
   seg.segments.prod["beta-users"].dest = { since: Date.parse("2026-10-23T09:00:00Z") };
   const segB = { ...clone(segmentBIdentical), description: "differs", lastModifiedDate: Date.parse("2026-10-23T08:00:00Z") };
   assertEquals(annotateWithManifest(reportFor(flagA, flagBIdentical, { segB }), seg).segments[0].sync.state, "inSync");
+  assertThrows(() => parseManifest(manifestFor({ dest: { environments: { production: { since: "x" } } } })), Error, "dest.environments.production.since");
   assertThrows(() => parseManifest(manifestFor({ dest: { since: "x" } })), Error, "dest.since");
 });
 
@@ -345,8 +347,10 @@ Deno.test("an edit in a cut-over environment keeps the flag level as it is", () 
 });
 
 Deno.test("B's ownership applies to environments the manifest has no source version for", () => {
+  const a = clone(flagA);
+  a.environments.dev.version = 7;
   const b = clone(flagBIdentical);
   b.environments.development.on = !b.environments.development.on;
-  const out = annotateWithManifest(reportFor(flagA, b), manifestFor({ targetOwned: { deleted: true } }));
+  const out = annotateWithManifest(reportFor(a, b), manifestFor({ targetOwned: { deleted: true } }));
   assertEquals([out.flags[0].sync.environments["dev→development"], out.flags[0].severity], ["editedInTarget", "info"]);
 });
