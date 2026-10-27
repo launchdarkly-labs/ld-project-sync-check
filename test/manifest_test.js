@@ -374,3 +374,30 @@ Deno.test("a B environment the destination records do not cover is untracked", (
   const out = annotateWithManifest(reportFor(flagA, b), m);
   assertEquals([out.flags[0].sync.environments["prod→production"], out.flags[0].severity], ["untracked", "error"]);
 });
+
+Deno.test("parseManifest rejects non-boolean flag and deleted ownership markers", () => {
+  assertThrows(() => parseManifest(manifestFor({ targetOwned: { deleted: "false" } })), Error, "targetOwned");
+  assertThrows(() => parseManifest(manifestFor({ targetOwned: { flag: 1 } })), Error, "targetOwned");
+  assertEquals(parseManifest(manifestFor({ targetOwned: { flag: true, deleted: false } })).warnings, []);
+});
+
+Deno.test("with B's own variations differing, a source targeting change is a conflict", () => {
+  const a = clone(flagA);
+  a.environments.prod.version = 41;
+  const b = clone(flagBIdentical);
+  b.variations[0].value = !b.variations[0].value;
+  const out = annotateWithManifest(reportFor(a, b), manifestFor({ targetOwned: { flag: true } }));
+  assertEquals([out.flags[0].sync.flagLevel, out.flags[0].sync.environments["prod→production"]], ["editedInTarget", "conflict"]);
+});
+
+Deno.test("a conflict-prefixed copy's prefixed name is not drift", () => {
+  const b = { ...clone(flagBIdentical), key: "mig-checkout-v2", name: `mig-${flagA.name}` };
+  const keys = new Map([["checkout-v2", "mig-checkout-v2"]]);
+  let [r] = compareFlags({ live: [flagA], archived: [] }, { live: [b], archived: [] }, envMap, opts, null, keys);
+  assertEquals(r.status, "identical");
+  [r] = compareFlags({ live: [flagA], archived: [] }, { live: [{ ...b, name: "renamed in EU" }], archived: [] }, envMap, opts, null, keys);
+  assertEquals(r.flagLevel.map((d) => d.path), ["name"]);
+  const segB = { ...clone(segmentBIdentical), key: "mig-beta-users", name: `mig-${segmentA.name}` };
+  const [s] = compareSegments([segmentA], [segB], envMap[0], opts, new Map([["prod/beta-users", "mig-beta-users"]]));
+  assertEquals(s.status, "identical");
+});

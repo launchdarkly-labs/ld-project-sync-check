@@ -62,7 +62,8 @@ every difference with why it exists:
 | `inSync` | Neither side changed since the last sync: the difference is unexplained | unchanged |
 
 So after a cutover, **pass** means "nothing unexpected", not "identical". Flags and segments are
-paired by the destination keys the manifest records (conflict-prefixed copies included), so
+paired by the destination keys the manifest records (conflict-prefixed copies included, whose
+prefixed name is expected), so
 `--key-prefix` is not needed. The report gains a `sync` block (last sync, last run, counts per
 state, cut-over environments, warnings) and a `sync` state on each flag and segment result; the
 Markdown report a "Sync state" section.
