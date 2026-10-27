@@ -248,3 +248,32 @@ Deno.test("a segment recorded for another destination environment has no baselin
   const out = annotateWithManifest(reportFor(flagA, flagBIdentical, { segB }), m);
   assertEquals([out.segments[0].sync.state, out.segments[0].severity], ["untracked", "error"]);
 });
+
+Deno.test("a dry run's record neither selects environments nor cuts any over", () => {
+  for (const run of [runFor({ dryRun: true, envMap: { dev: "development" } }), runFor({ manifestWritten: false, envMap: { dev: "development" } })]) {
+    assertEquals(parseRunRecord(run).warnings.length, 1);
+    const out = annotateWithManifest(reportFor(flagA, offInEu()), manifestFor(), run);
+    assertEquals([out.sync.cutOver, out.flags[0].sync.environments["prod→production"], out.flags[0].severity], [[], "inSync", "error"]);
+  }
+});
+
+Deno.test("entries whose last sync failed (source version reset to 0) keep their findings", () => {
+  const b = offInEu();
+  b.environments.production.version = 3;
+  let out = annotateWithManifest(reportFor(flagA, b), manifestFor({ version: 0, environments: {} }));
+  assertEquals([out.flags[0].sync.state, out.flags[0].severity], ["untracked", "error"]);
+  const m = manifestFor();
+  m.segments.prod["beta-users"].version = 0;
+  const segB = { ...clone(segmentBIdentical), description: "differs", version: 2 };
+  out = annotateWithManifest(reportFor(flagA, flagBIdentical, { segB }), m);
+  assertEquals([out.segments[0].sync.state, out.segments[0].severity], ["untracked", "error"]);
+});
+
+Deno.test("an environment owned by B protects the flag level even when it is not compared", () => {
+  const narrow = [envMap[1]];
+  const a = { ...clone(flagA), version: 13, description: "changed in US" };
+  const flags = compareFlags({ live: [a], archived: [] }, { live: [flagBIdentical], archived: [] }, narrow, opts);
+  const report = { ...reportFor(flagA, flagBIdentical), envMap: narrow, flags };
+  const out = annotateWithManifest(report, manifestFor({ targetOwned: { environments: ["production"] } }));
+  assertEquals([out.flags[0].sync.flagLevel, out.flags[0].severity], ["conflict", "warning"]);
+});

@@ -9,7 +9,7 @@
 import { HOSTS, makeClient } from "../lib/ld_api.js";
 import { compareProjects } from "../lib/compare.js";
 import { toMarkdown } from "../lib/report.js";
-import { annotateWithManifest, destKeysFromManifest, manifestMismatch, parseManifest, parseRunRecord, runRecordMismatch } from "../lib/manifest.js";
+import { annotateWithManifest, destKeysFromManifest, manifestMismatch, parseManifest, parseRunRecord, runRecordMismatch, runRecordWroteManifest } from "../lib/manifest.js";
 import { loadConfig, parse, parseEnvMap, pick, progressPrinter, stderr, writeOut } from "./_common.js";
 
 const args = parse({
@@ -93,7 +93,7 @@ if (runRecord && runRecordMismatch(runRecord, manifest)) {
 
 let envMap = parseEnvMap(args["env-map"]) ?? (Array.isArray(cfg.envMap) ? cfg.envMap : parseEnvMap(cfg.envMap));
 // The run's mapping is the natural default when a run record is given
-if (!envMap && runRecord) envMap = Object.entries(runRecord.envMap).map(([a, b]) => ({ a, b }));
+if (!envMap && runRecord && runRecordWroteManifest(runRecord)) envMap = Object.entries(runRecord.envMap).map(([a, b]) => ({ a, b }));
 if (!envMap) {
   const [ea, eb] = await Promise.all([clientA.listEnvironments(projectA), clientB.listEnvironments(projectB)]);
   const bKeys = new Set(eb.map((e) => e.key));
