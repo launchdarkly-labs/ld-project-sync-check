@@ -354,3 +354,23 @@ Deno.test("B's ownership applies to environments the manifest has no source vers
   const out = annotateWithManifest(reportFor(a, b), manifestFor({ targetOwned: { deleted: true } }));
   assertEquals([out.flags[0].sync.environments["dev→development"], out.flags[0].severity], ["editedInTarget", "info"]);
 });
+
+Deno.test("an omitted source version is no evidence of a source change", () => {
+  const m = manifestFor();
+  delete m.flags["checkout-v2"].version;
+  delete m.segments.prod["beta-users"].version;
+  const a = { ...clone(flagA), description: "differs" };
+  const segB = { ...clone(segmentBIdentical), description: "differs" };
+  const out = annotateWithManifest(reportFor(a, flagBIdentical, { segB }), m);
+  assertEquals([out.flags[0].sync.flagLevel, out.flags[0].severity], ["inSync", "error"]);
+  assertEquals([out.segments[0].sync.state, out.segments[0].severity], ["inSync", "error"]);
+});
+
+Deno.test("a B environment the destination records do not cover is untracked", () => {
+  // Recorded prod→old-production; this check compares prod→production
+  const m = manifestFor({ dest: { version: 1, environments: { "old-production": { version: 2 } } } });
+  const b = offInEu();
+  b.environments.production.lastModified = Date.parse("2026-10-23T10:00:00Z");
+  const out = annotateWithManifest(reportFor(flagA, b), m);
+  assertEquals([out.flags[0].sync.environments["prod→production"], out.flags[0].severity], ["untracked", "error"]);
+});
