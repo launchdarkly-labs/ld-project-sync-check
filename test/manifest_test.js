@@ -209,7 +209,7 @@ Deno.test("an untracked segment created in A after the last run waits for the sy
 });
 
 const runFor = (overrides = {}) => ({
-  schemaVersion: 1, startedAt: "2026-10-22T08:55:00Z", envMap: { prod: "production", dev: "development" },
+  schemaVersion: 1, startedAt: "2026-10-22T08:55:00.000Z", envMap: { prod: "production", dev: "development" },
   source: { projectKey: "p" }, destination: { projectKey: "p", domain: "app.eu.launchdarkly.com" }, conflicts: [], ...overrides,
 });
 
@@ -276,4 +276,17 @@ Deno.test("an environment owned by B protects the flag level even when it is not
   const report = { ...reportFor(flagA, flagBIdentical), envMap: narrow, flags };
   const out = annotateWithManifest(report, manifestFor({ targetOwned: { environments: ["production"] } }));
   assertEquals([out.flags[0].sync.flagLevel, out.flags[0].severity], ["conflict", "warning"]);
+});
+
+Deno.test("a run record from another run than the manifest's last one is ignored", () => {
+  const old = runFor({ startedAt: "2026-10-20T08:00:00.000Z", envMap: { dev: "development" } });
+  assertEquals(runRecordMismatch(old, manifestFor()) !== null, true);
+  assertEquals(runRecordMismatch(runFor(), manifestFor()), null);
+  // A dry run after the last real run is fine; its mapping is not used anyway
+  assertEquals(runRecordMismatch({ ...old, dryRun: true }, manifestFor()), null);
+});
+
+Deno.test("a copy deleted and recreated in B is B's everywhere", () => {
+  const out = annotateWithManifest(reportFor(flagA, offInEu()), manifestFor({ targetOwned: { deleted: true } }));
+  assertEquals([out.flags[0].sync.state, out.flags[0].severity], ["editedInTarget", "info"]);
 });
