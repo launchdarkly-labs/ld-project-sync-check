@@ -169,7 +169,7 @@ Deno.test("parseManifest rejects malformed versions and destination keys", () =>
 
 Deno.test("entries without destKey pair under their own key, ahead of --key-prefix", () => {
   const keys = destKeysFromManifest(manifestFor());
-  assertEquals([keys.flags.get("checkout-v2"), keys.segments.get("prod/beta-users")], ["checkout-v2", "beta-users"]);
+  assertEquals([keys.flags.get("checkout-v2"), keys.segments.get("prod/production/beta-users")], ["checkout-v2", "beta-users"]);
   const prefixed = { ...opts, keyPrefix: "mig-" };
   const [r] = compareFlags({ live: [flagA], archived: [] }, { live: [flagBIdentical], archived: [] }, envMap, prefixed, null, keys.flags);
   assertEquals([r.keyB, r.status], ["checkout-v2", "identical"]);
@@ -420,4 +420,32 @@ Deno.test("target-only flags and segments get a sync state and are counted", () 
   const sg = out.segments.find((x) => x.key === "eu-segment");
   assertEquals([sg.sync, sg.severity], [{ state: "untracked" }, "info"]);
   assertEquals([out.sync.counts.flags.untracked, out.sync.counts.segments.untracked], [1, 1]);
+});
+
+Deno.test("segment destination keys only apply to the recorded destination environment", () => {
+  const m = manifestFor();
+  Object.assign(m.segments.prod["beta-users"], { destEnv: "old-production", destKey: "mig-beta-users" });
+  const keys = destKeysFromManifest(m);
+  const results = compareSegments([segmentA], [segmentBIdentical, { ...clone(segmentBIdentical), key: "mig-beta-users" }], envMap[0], opts, keys.segments);
+  const s = results.find((r) => r.status !== "extraInB");
+  assertEquals([s.keyB, s.status], ["beta-users", "identical"]);
+  // Entries without destEnv (before 3.4) still pair in any destination environment
+  delete m.segments.prod["beta-users"].destEnv;
+  const [t] = compareSegments([segmentA], [{ ...clone(segmentBIdentical), key: "mig-beta-users" }], envMap[0], opts, destKeysFromManifest(m).segments);
+  assertEquals(t.keyB, "mig-beta-users");
+});
+
+Deno.test("an adopted extra copy of a source still in A is not source-deleted", () => {
+  const extra = { ...clone(flagBIdentical), key: "checkout-v2-old" };
+  const flags = compareFlags({ live: [flagA], archived: [] }, { live: [flagBIdentical, extra], archived: [] }, envMap, opts);
+  const out = annotateWithManifest({ ...reportFor(flagA, flagBIdentical), flags }, manifestFor({ extraDestKeys: ["checkout-v2-old"] }));
+  assertEquals(out.flags.find((x) => x.key === "checkout-v2-old").sync, { state: "untracked" });
+});
+
+Deno.test("a recorded segment created after the run whose sync failed stays untracked", () => {
+  const m = manifestFor();
+  m.segments.prod["new-segment"] = { version: 0, destEnv: "production" };
+  const fresh = { ...clone(segmentA), key: "new-segment", creationDate: Date.parse("2026-10-23T08:00:00Z") };
+  const out = annotateWithManifest(reportFor(flagA, flagBIdentical, { segA: fresh, segB: null }), m);
+  assertEquals([out.segments[0].sync.state, out.segments[0].severity], ["untracked", "error"]);
 });

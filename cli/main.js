@@ -32,7 +32,7 @@ if (args.help) {
   --manifest <file>           Sync manifest from ld-migration-scripts: pairs keys as recorded and labels
                               each difference (waiting for the next sync, changed in B after the last
                               sync, conflict, ...); expected differences become info
-  --run-record <file>         Run record of the last migrate run (runs/latest-<src>-<dst>.json): last
+  --run-record <file>         Run record of the last migrate run (runs/<src>/<dst>/latest.json): last
                               run details, and environments no longer synced count as cut over
   --out <dir>                 Output directory (default: out)
   --fail-on error|warn        Exit 1 on warnings too

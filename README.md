@@ -49,7 +49,7 @@ individual contexts may land in a different bucket even when the rollout is iden
 During a migration the projects keep changing: the source until it is frozen, the target once teams
 start working there. Given the sync manifest of [ld-migration-scripts](https://github.com/launchdarkly-labs/ld-migration-scripts)
 (`data/launchdarkly-migrations/sync-manifest-<source>-<dest>.json`), and optionally the run record of
-its last run (`runs/latest-<source>-<dest>.json`, ld-migration-scripts ≥ 3.6.0), the checker labels
+its last run (`runs/<source>/<dest>/latest.json`, ld-migration-scripts ≥ 3.6.0), the checker labels
 every difference with why it exists:
 
 | State | Meaning | Severity |
@@ -76,7 +76,7 @@ B environment or segment counts as edited when it was modified after the last sy
 ```bash
 deno task check --a-project my-project \
   --manifest ../ld-migration-scripts/data/launchdarkly-migrations/sync-manifest-my-project-my-project.json \
-  --run-record ../ld-migration-scripts/data/launchdarkly-migrations/runs/latest-my-project-my-project.json
+  --run-record ../ld-migration-scripts/data/launchdarkly-migrations/runs/my-project/my-project/latest.json
 ```
 
 With `--run-record` and no `--env-map`, the run's environment mapping is used. In a `--config` file
