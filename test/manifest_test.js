@@ -290,3 +290,21 @@ Deno.test("a copy deleted and recreated in B is B's everywhere", () => {
   const out = annotateWithManifest(reportFor(flagA, offInEu()), manifestFor({ targetOwned: { deleted: true } }));
   assertEquals([out.flags[0].sync.state, out.flags[0].severity], ["editedInTarget", "info"]);
 });
+
+Deno.test("legacy entries use legacyEditCutoff when the manifest has one", () => {
+  const legacy = manifestFor();
+  delete legacy.flags["checkout-v2"].dest;
+  legacy.legacyEditCutoff = "2026-10-20T09:00:00.000Z";
+  const b = offInEu();
+  // Edited in B before the last sync on this version but after the last legacy run
+  b.environments.production.lastModified = Date.parse("2026-10-21T10:00:00Z");
+  assertEquals(annotateWithManifest(reportFor(flagA, b), legacy).flags[0].sync.state, "editedInTarget");
+});
+
+Deno.test("conflicts of a dry run's record are not taken as source changes", () => {
+  const b = offInEu();
+  b.environments.production.version = 3;
+  const conflicts = [{ kind: "flag", key: "checkout-v2", destKey: "checkout-v2", scope: "environment", env: "production", sourceChanged: true }];
+  const out = annotateWithManifest(reportFor(flagA, b), manifestFor(), runFor({ dryRun: true, startedAt: "2026-10-23T08:00:00.000Z", conflicts }));
+  assertEquals(out.flags[0].sync.environments["prod→production"], "editedInTarget");
+});
