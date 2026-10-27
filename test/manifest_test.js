@@ -1,7 +1,7 @@
 import { assertEquals, assertThrows } from "@std/assert";
 import { compareFlags, compareSegments } from "../lib/compare.js";
 import { summarize, toMarkdown } from "../lib/report.js";
-import { annotateWithManifest, destKeysFromManifest, parseManifest, parseRunRecord } from "../lib/manifest.js";
+import { annotateWithManifest, destKeysFromManifest, manifestMismatch, parseManifest, parseRunRecord, runRecordMismatch } from "../lib/manifest.js";
 import { flagA, flagBIdentical, segmentA, segmentBIdentical } from "./fixtures/flags.js";
 
 const envMap = [{ a: "prod", b: "production" }, { a: "dev", b: "development" }];
@@ -153,4 +153,57 @@ Deno.test("markdown has a sync state section and the input report is untouched",
   assertEquals(JSON.stringify(report), before);
   assertEquals(md.includes("## Sync state"), true);
   assertEquals(md.includes("**Changed in B after the last sync (left as it is by the migration)**: `checkout-v2`"), true);
+});
+
+Deno.test("parseManifest rejects malformed versions and destination keys", () => {
+  assertThrows(() => parseManifest(manifestFor({ environments: { prod: { version: "40" } } })), Error, "flags.checkout-v2.environments.prod.version");
+  assertThrows(() => parseManifest(manifestFor({ destKey: 7 })), Error, "flags.checkout-v2.destKey");
+  assertThrows(() => parseManifest(manifestFor({ dest: { version: 1, environments: { production: { version: "2" } } } })), Error, "dest.environments.production.version");
+  const m = manifestFor();
+  m.segments.prod["beta-users"].version = "3";
+  assertThrows(() => parseManifest(m), Error, "segments.prod.beta-users.version");
+  m.segments.prod["beta-users"].version = 3;
+  m.segments.prod["beta-users"].targetOwned = true;
+  assertThrows(() => parseManifest(m), Error, "segments.prod.beta-users.targetOwned");
+});
+
+Deno.test("entries without destKey pair under their own key, ahead of --key-prefix", () => {
+  const keys = destKeysFromManifest(manifestFor());
+  assertEquals([keys.flags.get("checkout-v2"), keys.segments.get("prod/beta-users")], ["checkout-v2", "beta-users"]);
+  const prefixed = { ...opts, keyPrefix: "mig-" };
+  const [r] = compareFlags({ live: [flagA], archived: [] }, { live: [flagBIdentical], archived: [] }, envMap, prefixed, null, keys.flags);
+  assertEquals([r.keyB, r.status], ["checkout-v2", "identical"]);
+});
+
+Deno.test("a manifest for another project or instance is ignored and leaves findings as they are", () => {
+  const report = reportFor(flagA, null);
+  for (const m of [{ ...manifestFor(), destProject: "other" }, { ...manifestFor(), destDomain: "app.launchdarkly.com" }]) {
+    const out = annotateWithManifest(report, m);
+    assertEquals([out.sync.ignored, out.flags[0].severity, out.flags[0].sync, out.summary.status], [true, "error", undefined, report.summary.status]);
+    assertEquals(out.sync.warnings.length, 1);
+  }
+  assertEquals(manifestMismatch(manifestFor(), { projectA: "p", projectB: "p", baseUrlB: "https://app.eu.launchdarkly.com/" }), null);
+  assertEquals(manifestMismatch(manifestFor(), { projectA: "p", projectB: "q", baseUrlB: null }) !== null, true);
+  const run = { source: { projectKey: "p" }, destination: { projectKey: "elsewhere" } };
+  assertEquals(runRecordMismatch(run, manifestFor()) !== null, true);
+});
+
+Deno.test("deleted in B and changed in A since is a conflict, for flags and segments", () => {
+  const a = clone(flagA);
+  a.environments.prod.version = 41;
+  let out = annotateWithManifest(reportFor(a, null), manifestFor());
+  assertEquals([out.flags[0].sync, out.flags[0].severity], [{ state: "conflict", deleted: true }, "warning"]);
+  out = annotateWithManifest(reportFor(flagA, flagBIdentical, { segA: { ...clone(segmentA), version: 4 }, segB: null }), manifestFor());
+  assertEquals([out.segments[0].sync, out.segments[0].severity], [{ state: "conflict", deleted: true }, "warning"]);
+  out = annotateWithManifest(reportFor(flagA, flagBIdentical, { segB: null }), manifestFor());
+  assertEquals([out.segments[0].sync, out.segments[0].severity], [{ state: "editedInTarget", deleted: true }, "info"]);
+});
+
+Deno.test("an untracked segment created in A after the last run waits for the sync", () => {
+  const fresh = { ...clone(segmentA), key: "new-segment", creationDate: Date.parse("2026-10-23T08:00:00Z") };
+  let out = annotateWithManifest(reportFor(flagA, flagBIdentical, { segA: fresh, segB: null }), manifestFor());
+  assertEquals([out.segments[0].sync.state, out.segments[0].severity], ["pendingSource", "info"]);
+  const old = { ...clone(segmentA), key: "old-segment" };
+  out = annotateWithManifest(reportFor(flagA, flagBIdentical, { segA: old, segB: null }), manifestFor());
+  assertEquals([out.segments[0].sync.state, out.segments[0].severity], ["untracked", "error"]);
 });

@@ -79,7 +79,10 @@ deno task check --a-project my-project \
 ```
 
 With `--run-record` and no `--env-map`, the run's environment mapping is used. In a `--config` file
-the keys are `manifest` and `runRecord`.
+the keys are `manifest` and `runRecord`. The CLI refuses a manifest written for other projects or
+another destination instance (its versions say nothing about this check), and ignores a run record
+that belongs to a different manifest. A recorded flag or segment deleted in B while A changed since
+is a `conflict`.
 
 ## CLI
 

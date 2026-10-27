@@ -9,7 +9,7 @@
 import { HOSTS, makeClient } from "../lib/ld_api.js";
 import { compareProjects } from "../lib/compare.js";
 import { toMarkdown } from "../lib/report.js";
-import { annotateWithManifest, destKeysFromManifest, parseManifest, parseRunRecord } from "../lib/manifest.js";
+import { annotateWithManifest, destKeysFromManifest, manifestMismatch, parseManifest, parseRunRecord, runRecordMismatch } from "../lib/manifest.js";
 import { loadConfig, parse, parseEnvMap, pick, progressPrinter, stderr, writeOut } from "./_common.js";
 
 const args = parse({
@@ -80,6 +80,16 @@ try {
   fail(err.message);
 }
 if (runRecord && !manifest) fail("--run-record needs --manifest");
+if (manifest) {
+  // A manifest for other projects would pair the wrong keys and relabel real drift as expected
+  const mismatch = manifestMismatch(manifest, { projectA, projectB, baseUrlB: bUrl });
+  if (mismatch) fail(`${mismatch} Pass the manifest of this migration`);
+}
+if (runRecord && runRecordMismatch(runRecord, manifest)) {
+  // Dropped before its environment mapping can narrow the comparison
+  syncWarnings.push(runRecordMismatch(runRecord, manifest));
+  runRecord = null;
+}
 
 let envMap = parseEnvMap(args["env-map"]) ?? (Array.isArray(cfg.envMap) ? cfg.envMap : parseEnvMap(cfg.envMap));
 // The run's mapping is the natural default when a run record is given
