@@ -449,3 +449,23 @@ Deno.test("a recorded segment created after the run whose sync failed stays untr
   const out = annotateWithManifest(reportFor(flagA, flagBIdentical, { segA: fresh, segB: null }), m);
   assertEquals([out.segments[0].sync.state, out.segments[0].severity], ["untracked", "error"]);
 });
+
+Deno.test("parseManifest rejects malformed timestamps and approval markers", () => {
+  for (const field of ["lastSyncTimestamp", "lastRunStartedAt", "legacyEditCutoff"]) {
+    assertThrows(() => parseManifest({ ...manifestFor(), [field]: "soon" }), Error, field);
+    assertThrows(() => parseManifest({ ...manifestFor(), [field]: 1760000000000 }), Error, field);
+  }
+  const legacy = manifestFor();
+  delete legacy.lastRunStartedAt;
+  assertEquals(parseManifest(legacy).warnings, []);
+  assertThrows(() => parseManifest(manifestFor({ awaitingApproval: "production" })), Error, "awaitingApproval");
+});
+
+Deno.test("an environment with the migration's approval request pending waits for it", () => {
+  // The request is not applied yet: A's version recorded, B unchanged, still different
+  const out = annotateWithManifest(reportFor(flagA, offInEu()), manifestFor({ awaitingApproval: ["production"] }));
+  assertEquals([out.flags[0].sync.environments["prod→production"], out.flags[0].severity], ["pendingSource", "info"]);
+  // B's ownership still wins
+  const owned = annotateWithManifest(reportFor(flagA, offInEu()), manifestFor({ awaitingApproval: ["production"], targetOwned: { environments: ["production"] } }));
+  assertEquals(owned.flags[0].sync.environments["prod→production"], "editedInTarget");
+});
