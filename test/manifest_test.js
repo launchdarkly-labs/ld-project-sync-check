@@ -207,3 +207,44 @@ Deno.test("an untracked segment created in A after the last run waits for the sy
   out = annotateWithManifest(reportFor(flagA, flagBIdentical, { segA: old, segB: null }), manifestFor());
   assertEquals([out.segments[0].sync.state, out.segments[0].severity], ["untracked", "error"]);
 });
+
+const runFor = (overrides = {}) => ({
+  schemaVersion: 1, startedAt: "2026-10-22T08:55:00Z", envMap: { prod: "production", dev: "development" },
+  source: { projectKey: "p" }, destination: { projectKey: "p", domain: "app.eu.launchdarkly.com" }, conflicts: [], ...overrides,
+});
+
+Deno.test("parseRunRecord rejects malformed environment mappings and resource lists", () => {
+  assertThrows(() => parseRunRecord(runFor({ envMap: { prod: 42 } })), Error, "envMap.prod");
+  assertThrows(() => parseRunRecord(runFor({ conflicts: [{ kind: "flag" }] })), Error, "conflicts");
+  assertEquals(parseRunRecord(runFor()).warnings, []);
+});
+
+Deno.test("a run record for another destination instance is ignored", () => {
+  const run = runFor({ destination: { projectKey: "p", domain: "app.launchdarkly.com" } });
+  assertEquals(runRecordMismatch(run, manifestFor()) !== null, true);
+  const out = annotateWithManifest(reportFor(flagA, offInEu()), manifestFor(), run);
+  assertEquals([out.sync.run, out.sync.cutOver, out.sync.warnings.length], [null, [], 1]);
+});
+
+Deno.test("conflicts of the last run stay conflicts though the manifest has the new source version", () => {
+  // migrate left production alone (edited in EU) and recorded A's current version anyway
+  const b = offInEu();
+  b.environments.production.version = 3;
+  const run = runFor({ conflicts: [{ kind: "flag", key: "checkout-v2", destKey: "checkout-v2", scope: "environment", env: "production", sourceChanged: true }] });
+  let out = annotateWithManifest(reportFor(flagA, b), manifestFor());
+  assertEquals(out.flags[0].sync.environments["prod→production"], "editedInTarget");
+  out = annotateWithManifest(reportFor(flagA, b), manifestFor(), run);
+  assertEquals([out.flags[0].sync.environments["prod→production"], out.flags[0].severity], ["conflict", "warning"]);
+  const segB = { ...clone(segmentBIdentical), description: "edited in EU", version: 2 };
+  const segRun = runFor({ conflicts: [{ kind: "segment", key: "beta-users", destKey: "beta-users", scope: "environment", env: "production", sourceChanged: true }] });
+  out = annotateWithManifest(reportFor(flagA, flagBIdentical, { segB }), manifestFor(), segRun);
+  assertEquals([out.segments[0].sync.state, out.segments[0].severity], ["conflict", "warning"]);
+});
+
+Deno.test("a segment recorded for another destination environment has no baseline here", () => {
+  const m = manifestFor();
+  m.segments.prod["beta-users"].destEnv = "old-production";
+  const segB = { ...clone(segmentBIdentical), description: "differs", version: 2 };
+  const out = annotateWithManifest(reportFor(flagA, flagBIdentical, { segB }), m);
+  assertEquals([out.segments[0].sync.state, out.segments[0].severity], ["untracked", "error"]);
+});
