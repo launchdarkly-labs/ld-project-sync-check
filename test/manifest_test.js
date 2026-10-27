@@ -51,7 +51,7 @@ Deno.test("parseManifest and parseRunRecord reject other files and warn on gaps"
   delete legacy.flags["checkout-v2"].dest;
   assertEquals(parseManifest(legacy).warnings.length, 1);
   assertEquals(parseManifest(manifestFor()).warnings, []);
-  assertEquals(parseRunRecord({ schemaVersion: 9, startedAt: "x", envMap: {}, dryRun: true }).warnings.length, 2);
+  assertEquals(parseRunRecord({ schemaVersion: 9, startedAt: "2026-10-22T08:55:00Z", envMap: {}, dryRun: true }).warnings.length, 2);
 });
 
 Deno.test("a difference with both sides unchanged since the last sync stays an error", () => {
@@ -400,4 +400,24 @@ Deno.test("a conflict-prefixed copy's prefixed name is not drift", () => {
   const segB = { ...clone(segmentBIdentical), key: "mig-beta-users", name: `mig-${segmentA.name}` };
   const [s] = compareSegments([segmentA], [segB], envMap[0], opts, new Map([["prod/beta-users", "mig-beta-users"]]));
   assertEquals(s.status, "identical");
+});
+
+Deno.test("parseRunRecord rejects an invalid startedAt", () => {
+  assertThrows(() => parseRunRecord(runFor({ startedAt: "not-a-timestamp" })), Error, "startedAt");
+});
+
+Deno.test("target-only flags and segments get a sync state and are counted", () => {
+  const extra = { ...clone(flagBIdentical), key: "only-in-eu" };
+  const flags = compareFlags({ live: [flagA], archived: [] }, { live: [flagBIdentical, extra], archived: [] }, envMap, opts);
+  const segments = compareSegments([segmentA], [segmentBIdentical, { ...clone(segmentBIdentical), key: "eu-segment" }], envMap[0], opts);
+  const report = { ...reportFor(flagA, flagBIdentical), flags, segments };
+  // A recorded copy whose source flag is gone from A
+  const m = manifestFor();
+  m.flags["deleted-in-us"] = { version: 1, destKey: "only-in-eu" };
+  const out = annotateWithManifest(report, m);
+  const f = out.flags.find((x) => x.key === "only-in-eu");
+  assertEquals([f.sync, f.severity], [{ state: "untracked", sourceDeleted: true }, "info"]);
+  const sg = out.segments.find((x) => x.key === "eu-segment");
+  assertEquals([sg.sync, sg.severity], [{ state: "untracked" }, "info"]);
+  assertEquals([out.sync.counts.flags.untracked, out.sync.counts.segments.untracked], [1, 1]);
 });
