@@ -84,6 +84,16 @@ if (manifest) {
   // A manifest for other projects would pair the wrong keys and relabel real drift as expected
   const mismatch = manifestMismatch(manifest, { projectA, projectB, baseUrlB: bUrl });
   if (mismatch) fail(`${mismatch} Pass the manifest of this migration`);
+  // Project keys repeat across accounts on one instance: check the account too, when both are known
+  if (manifest.destAccountId) {
+    const accountB = await clientB.callerIdentity().then((who) => who?.accountId, (err) => {
+      syncWarnings.push(`Could not read side B's account (${err.message}); the manifest's account ${manifest.destAccountId} is not checked.`);
+      return undefined;
+    });
+    if (accountB && accountB !== manifest.destAccountId) {
+      fail(`The manifest was written for account ${manifest.destAccountId}, side B's token belongs to ${accountB}. Pass the manifest of this migration`);
+    }
+  }
 }
 if (runRecord && runRecordMismatch(runRecord, manifest)) {
   // Dropped before its environment mapping can narrow the comparison

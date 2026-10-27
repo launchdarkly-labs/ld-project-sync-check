@@ -343,3 +343,10 @@ Deno.test("an edit in a cut-over environment keeps the flag level as it is", () 
   const out = annotateWithManifest({ ...reportFor(flagA, b), flags }, manifestFor(), run);
   assertEquals([out.flags[0].sync.environments["prod→production"], out.flags[0].sync.flagLevel], ["cutOver", "conflict"]);
 });
+
+Deno.test("B's ownership applies to environments the manifest has no source version for", () => {
+  const b = clone(flagBIdentical);
+  b.environments.development.on = !b.environments.development.on;
+  const out = annotateWithManifest(reportFor(flagA, b), manifestFor({ targetOwned: { deleted: true } }));
+  assertEquals([out.flags[0].sync.environments["dev→development"], out.flags[0].severity], ["editedInTarget", "info"]);
+});

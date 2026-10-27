@@ -79,8 +79,9 @@ deno task check --a-project my-project \
 ```
 
 With `--run-record` and no `--env-map`, the run's environment mapping is used. In a `--config` file
-the keys are `manifest` and `runRecord`. The CLI refuses a manifest written for other projects or
-another destination instance (its versions say nothing about this check), and ignores a run record
+the keys are `manifest` and `runRecord`. The CLI refuses a manifest written for other projects,
+another destination instance or (when the manifest records it) another destination account (its
+versions say nothing about this check), and ignores a run record
 that belongs to a different manifest. A dry run's record (or one whose run did not write the
 manifest) is shown, but its environment mapping is not used. Entries whose last sync failed have no
 baseline and keep their findings. A recorded flag or segment deleted in B while A changed since
