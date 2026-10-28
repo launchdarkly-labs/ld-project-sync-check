@@ -9,7 +9,7 @@
 import { HOSTS, makeClient } from "../lib/ld_api.js";
 import { compareProjects } from "../lib/compare.js";
 import { toMarkdown } from "../lib/report.js";
-import { annotateWithManifest, destKeysFromManifest, manifestMismatch, parseManifest, parseRunRecord, runRecordMismatch, runRecordWroteManifest } from "../lib/manifest.js";
+import { annotateWithManifest, checkSyncInputs, destKeysFromManifest, runRecordWroteManifest } from "../lib/manifest.js";
 import { loadConfig, parse, parseEnvMap, pick, progressPrinter, stderr, writeOut } from "./_common.js";
 
 const args = parse({
@@ -63,42 +63,17 @@ const readJson = async (path, what) => {
 };
 const manifestPath = args.manifest ?? cfg.manifest;
 const runRecordPath = args["run-record"] ?? cfg.runRecord;
-let manifest = null, runRecord = null;
-const syncWarnings = [];
+if (runRecordPath && !manifestPath) fail("--run-record needs --manifest");
+let manifest = null, runRecord = null, syncWarnings = [];
 try {
-  if (manifestPath) {
-    const parsed = parseManifest(await readJson(manifestPath, "sync manifest"));
-    manifest = parsed.manifest;
-    syncWarnings.push(...parsed.warnings);
-  }
-  if (runRecordPath) {
-    const parsed = parseRunRecord(await readJson(runRecordPath, "run record"));
-    runRecord = parsed.run;
-    syncWarnings.push(...parsed.warnings);
-  }
+  ({ manifest, runRecord, warnings: syncWarnings } = await checkSyncInputs({
+    manifestJson: manifestPath ? await readJson(manifestPath, "sync manifest") : null,
+    runRecordJson: runRecordPath ? await readJson(runRecordPath, "run record") : null,
+    projectA, projectB, baseUrlB: bUrl,
+    accountB: () => clientB.callerIdentity().then((who) => who?.accountId),
+  }));
 } catch (err) {
   fail(err.message);
-}
-if (runRecord && !manifest) fail("--run-record needs --manifest");
-if (manifest) {
-  // A manifest for other projects would pair the wrong keys and relabel real drift as expected
-  const mismatch = manifestMismatch(manifest, { projectA, projectB, baseUrlB: bUrl });
-  if (mismatch) fail(`${mismatch} Pass the manifest of this migration`);
-  // Project keys repeat across accounts on one instance: check the account too, when both are known
-  if (manifest.destAccountId) {
-    const accountB = await clientB.callerIdentity().then((who) => who?.accountId, (err) => {
-      syncWarnings.push(`Could not read side B's account (${err.message}); the manifest's account ${manifest.destAccountId} is not checked.`);
-      return undefined;
-    });
-    if (accountB && accountB !== manifest.destAccountId) {
-      fail(`The manifest was written for account ${manifest.destAccountId}, side B's token belongs to ${accountB}. Pass the manifest of this migration`);
-    }
-  }
-}
-if (runRecord && runRecordMismatch(runRecord, manifest)) {
-  // Dropped before its environment mapping can narrow the comparison
-  syncWarnings.push(runRecordMismatch(runRecord, manifest));
-  runRecord = null;
 }
 
 let envMap = parseEnvMap(args["env-map"]) ?? (Array.isArray(cfg.envMap) ? cfg.envMap : parseEnvMap(cfg.envMap));

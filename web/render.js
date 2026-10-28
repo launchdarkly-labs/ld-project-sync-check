@@ -1,6 +1,8 @@
 // DOM builders. Everything from the API goes through textContent, never innerHTML.
 
 import { SEVERITIES } from "../lib/severity.js";
+import { SYNC_STATE_LABELS } from "../lib/manifest.js";
+import { MEANING_GROUPS, syncStatusLine, verdictText } from "../lib/report.js";
 
 export const el = (tag, attrs = {}, ...children) => {
   const n = document.createElement(tag);
@@ -17,6 +19,18 @@ const show = (v) => (v === undefined ? "—" : JSON.stringify(v));
 
 export function badge(text) {
   return el("span", { class: `badge ${text}` }, text === "missingInB" ? "missing in B" : text === "extraInB" ? "only in B" : text);
+}
+
+export const SYNC_SHORT = { pendingSource: "pending", editedInTarget: "edited in B", conflict: "conflict", cutOver: "cut over", untracked: "untracked", inSync: "no change since sync" };
+/** The sync state of a result; "in sync" when it is identical, "unexplained" when it differs anyway. */
+export function syncBadge(state, status) {
+  if (!state) return el("span", { class: "muted" }, "—");
+  if (state === "inSync") {
+    return status === "identical"
+      ? el("span", { class: "badge sync-ok", title: "Identical, and neither side changed since the last sync" }, "in sync")
+      : el("span", { class: "badge sync-inSync", title: SYNC_STATE_LABELS.inSync }, "unexplained");
+  }
+  return el("span", { class: `badge sync-${state}`, title: SYNC_STATE_LABELS[state] }, SYNC_SHORT[state] ?? state);
 }
 
 // --- time helpers ---
@@ -253,10 +267,12 @@ export function renderFlags(container, o) {
     return el("th", { title, "aria-sort": active ? (sort.dir === "asc" ? "ascending" : "descending") : undefined },
       el("button", { type: "button", class: `sort${active ? " on" : ""}`, "data-sort": key, onclick: () => o.onSort(key) }, label, arrow));
   };
-  const COLS = 7;
+  const withSync = Boolean(o.withSync);
+  const COLS = withSync ? 8 : 7;
   const t = el("table", {}, el("thead", {}, el("tr", {},
     th("Flag key", "key"),
     th("Result"),
+    withSync ? th("Sync", undefined, "Why the flag differs, from the migration's manifest") : null,
     th("Severity"),
     th("Created (A)", "created", "When the flag was created in the source project"),
     th("Updated (A)", "updated", "Latest targeting change among the compared source environments"),
@@ -275,6 +291,7 @@ export function renderFlags(container, o) {
     body.append(...expandable([
       el("td", { class: "key" }, f.key, stateChips(f)),
       el("td", {}, badge(f.status)),
+      withSync ? el("td", {}, syncBadge(f.sync?.state, f.status)) : null,
       el("td", {}, badge(f.severity)),
       f.status === "extraInB" ? el("td", { class: "time muted" }, "—") : timeCell(f.createdA),
       f.status === "extraInB" ? el("td", { class: "time muted" }, "—") : timeCell(f.updatedA),
@@ -286,13 +303,14 @@ export function renderFlags(container, o) {
   container.append(t);
 }
 
-export function renderSegments(container, segments) {
+export function renderSegments(container, segments, withSync = false) {
   container.textContent = "";
   if (!segments.length) { container.append(el("p", { class: "empty" }, "No segments in the compared environments.")); return; }
   const t = el("table", {}, el("thead", {}, el("tr", {},
     el("th", {}, "Segment"),
     el("th", {}, "Environments"),
     el("th", {}, "Result"),
+    withSync ? el("th", { title: "Why the segment differs, from the migration's manifest" }, "Sync") : null,
     el("th", {}, "Severity"),
     el("th", { title: "When the segment was created in the source environment" }, "Created (A)"),
     el("th", { title: "Last change to the segment in the source environment" }, "Updated (A)"),
@@ -306,11 +324,12 @@ export function renderSegments(container, segments) {
       el("td", { class: "key" }, s.key),
       el("td", {}, `${s.envA} → ${s.envB}`),
       el("td", {}, badge(s.status)),
+      withSync ? el("td", {}, syncBadge(s.sync?.state, s.status)) : null,
       el("td", {}, badge(s.severity)),
       s.status === "extraInB" ? el("td", { class: "time muted" }, "—") : timeCell(s.createdA),
       s.status === "extraInB" ? el("td", { class: "time muted" }, "—") : timeCell(s.updatedA),
       s.status === "missingInB" ? el("td", { class: "time muted" }, "—") : timeCell(s.updatedB),
-    ], 7, detail));
+    ], withSync ? 8 : 7, detail));
   }
   t.append(body);
   container.append(t);
@@ -320,4 +339,56 @@ export function renderErrors(container, errors) {
   container.textContent = "";
   if (!errors.length) return;
   container.append(el("div", { class: "errbox" }, el("strong", {}, "Some requests failed; the report is incomplete."), el("ul", {}, errors.map((e) => el("li", {}, `${e.context ?? ""} HTTP ${e.status}: ${e.message}`)))));
+}
+
+// --- plain-language result (both views) and migration state (operator view) ---
+
+export function renderVerdict(container, report, groups) {
+  container.textContent = verdictText(report, groups);
+  container.className = `verdict-text ${report.summary.status}`;
+}
+
+/** One block per meaning group, each listing its flags and segments with where they differ. */
+export function renderMeaning(container, report, groups) {
+  container.textContent = "";
+  const a = report.sides.a.label, b = report.sides.b.label;
+  for (const g of groups) {
+    const def = MEANING_GROUPS.find((x) => x.id === g.id);
+    const list = el("ul", { class: "meaning-items" }, g.items.map((x) => el("li", {},
+      el("span", { class: "key" }, x.key), x.keyB ? el("span", { class: "muted" }, ` (${x.keyB} in B)`) : null,
+      x.kind === "segment" ? el("span", { class: "chip" }, "segment") : null,
+      x.where.length ? el("span", { class: "where" }, x.where.join(", ")) : null)));
+    container.append(el("details", { class: `meaning-group ${g.id}`, open: g.id === "unexpected" || g.id === "conflict" },
+      el("summary", {}, el("span", { class: "swatch" }), el("strong", {}, def.title(a, b)), el("span", { class: "c" }, g.items.length)),
+      el("p", { class: "hint" }, def.hint(a, b)),
+      list));
+  }
+}
+
+export function renderSyncLine(line, warningsList, sync) {
+  line.textContent = syncStatusLine(sync);
+  line.hidden = !sync;
+  warningsList.textContent = "";
+  const warnings = sync?.warnings ?? [];
+  for (const w of warnings) warningsList.append(el("li", {}, w));
+  warningsList.hidden = !warnings.length;
+}
+
+/** What the last run (as its run record tells) left as it is in B. */
+export function renderRunItems(container, run) {
+  container.textContent = "";
+  const items = run?.items;
+  if (!items || (!items.protected?.length && !items.conflicts?.length)) return;
+  const row = (r, conflict) => el("tr", {},
+    el("td", { class: "key" }, r.key, r.kind === "segment" ? el("span", { class: "chip" }, "segment") : null),
+    el("td", {}, r.scope === "environment" ? `environment ${r.env ?? ""}` : r.scope === "flag" ? "flag-level fields" : r.scope ?? (r.env ? `environment ${r.env}` : "—")),
+    el("td", {}, conflict || r.sourceChanged ? syncBadge("conflict", "differs") : "no"));
+  const t = el("table", {}, el("thead", {}, el("tr", {}, el("th", {}, "Item"), el("th", {}, "Left as it is"), el("th", { title: "Whether the source changed too, so its change was not applied" }, "Source changed too"))),
+    el("tbody", {}, (items.protected ?? []).map((r) => row(r, false)), (items.conflicts ?? []).map((r) => row(r, true))));
+  const n = (items.protected?.length ?? 0) + (items.conflicts?.length ?? 0);
+  container.append(el("details", { class: "run-items" },
+    el("summary", {}, run.dryRun
+      ? `The dry run found ${n} edit${n === 1 ? "" : "s"} in B that a real run would leave as ${n === 1 ? "it is" : "they are"}`
+      : `The last run left ${n} edit${n === 1 ? "" : "s"} in B as ${n === 1 ? "it is" : "they are"}`),
+    el("div", { class: "table-wrap" }, t)));
 }
