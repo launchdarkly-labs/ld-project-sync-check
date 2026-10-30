@@ -14,6 +14,7 @@ const state = {
   manifest: null, runRecord: null,
   // The environment mapping a run record replaced: { from: the run record, before: [{ a, b }] }
   mapping: null,
+  running: false,
 };
 
 // --- where the page runs, and the view (drift check or migration operator) ---
@@ -158,25 +159,22 @@ form.addEventListener("submit", async (ev) => {
   if (!envMap.length) { progress.textContent = "Add at least one environment pair."; return; }
   const projectA = form.elements["a-project"].value.trim();
   const projectB = form.elements["b-project"].value.trim();
+  if (state.running) return;
   let clientA, clientB;
   try { clientA = clientFor("a"); clientB = clientFor("b"); } catch (err) { progress.textContent = err.message; return; }
-  // The migration state and the operator-only options apply in the operator view only
+  // Everything is taken as it is now: one set of clients (from the tokens as typed) checks the
+  // migration state and runs the comparison, and the controls stay disabled for all of it
   const useSync = operator() && (state.manifest || state.runRecord);
-  let sync = { manifest: null, runRecord: null, warnings: [] };
-  // Checked before the controls are disabled, so a refusal leaves the page ready for another run
-  if (useSync) {
-    try {
-      sync = await checkSyncInputs({
-        manifestJson: state.manifest?.json ?? null, runRecordJson: state.runRecord?.json ?? null,
-        projectA, projectB, baseUrlB: clientB.baseUrl,
-        accountB: () => clientB.callerIdentity().then((who) => who?.accountId),
-      });
-    } catch (err) {
-      progress.textContent = `Failed: ${err.message}`;
-      return;
-    }
-  }
+  const syncFiles = { manifestJson: state.manifest?.json ?? null, runRecordJson: state.runRecord?.json ?? null };
+  const options = {
+    includeArchived: form.elements["include-archived"].checked,
+    compareMaintainers: form.elements["compare-maintainers"].checked,
+    // The operator-only options apply in the operator view only
+    strictExtra: operator() && form.elements["strict-extra"].checked,
+    keyPrefix: operator() ? form.elements["key-prefix"].value.trim() : "",
+  };
   const run = $("#run"), cancel = $("#cancel");
+  state.running = true;
   run.disabled = true; cancel.hidden = false;
   const seen = {};
   const onProgress = (p) => {
@@ -190,15 +188,18 @@ form.addEventListener("submit", async (ev) => {
   clientB = makeClient({ baseUrl: clientB.baseUrl, token: form.elements["b-token"].value.trim(), signal: state.abort.signal });
   cancel.onclick = () => state.abort.abort();
   try {
+    let sync = { manifest: null, runRecord: null, warnings: [] };
+    if (useSync) {
+      progress.textContent = "Checking the migration state…";
+      sync = await checkSyncInputs({
+        ...syncFiles, projectA, projectB, baseUrlB: clientB.baseUrl,
+        accountB: () => clientB.callerIdentity().then((who) => who?.accountId),
+      });
+    }
     let report = await compareProjects({
       clientA, clientB, projectA, projectB, envMap,
       labels: { a: labelFor(clientA.baseUrl), b: labelFor(clientB.baseUrl) },
-      options: {
-        includeArchived: form.elements["include-archived"].checked,
-        compareMaintainers: form.elements["compare-maintainers"].checked,
-        strictExtra: operator() && form.elements["strict-extra"].checked,
-        keyPrefix: operator() ? form.elements["key-prefix"].value.trim() : "",
-      },
+      options,
       onProgress,
       destKeys: sync.manifest ? destKeysFromManifest(sync.manifest) : null,
     });
@@ -215,6 +216,7 @@ form.addEventListener("submit", async (ev) => {
   } catch (err) {
     progress.textContent = err.name === "AbortError" ? "Cancelled." : `Failed: ${err.message}`;
   } finally {
+    state.running = false;
     run.disabled = false; cancel.hidden = true;
   }
 });

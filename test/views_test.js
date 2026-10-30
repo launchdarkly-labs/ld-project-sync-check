@@ -110,6 +110,9 @@ Deno.test("parseReport rejects other files and non-https links", () => {
   assertThrows(() => parseReport({ ...good(), sides: { ...good().sides, b: { ...good().sides.b, baseUrl: "javascript:alert(1)" } } }), Error, "sides.b");
   assertThrows(() => parseReport({ ...good(), flags: [{ key: "x", status: "weird", severity: "error" }] }), Error, "flags[0]");
   assertThrows(() => parseReport({ ...good(), generatedAt: "yesterday" }), Error, "generatedAt");
+  assertThrows(() => parseReport({ ...good(), errors: [null] }), Error, "errors");
+  assertThrows(() => parseReport({ ...good(), errors: [{ status: "500", message: "x" }] }), Error, "errors");
+  parseReport({ ...good(), errors: [{ context: "flags A", status: 500, url: null, message: "x" }] });
   parseReport(good());
 });
 
