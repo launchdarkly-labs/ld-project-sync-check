@@ -388,12 +388,13 @@ export function renderRunItems(container, run) {
   const items = run?.items;
   if (!items || (!items.protected?.length && !items.conflicts?.length)) return;
   // The conflicts are a subset of the protected edits (the source changed too): one row each
-  const id = (r) => `${r.kind} ${r.key} ${r.scope ?? ""} ${r.env ?? ""}`;
+  // By destination copy: one source key can have several copies in B
+  const id = (r) => `${r.kind} ${r.key} ${r.destKey ?? r.key} ${r.scope ?? ""} ${r.env ?? ""}`;
   const conflictIds = new Set((items.conflicts ?? []).map(id));
   const rows = new Map();
   for (const r of [...(items.protected ?? []), ...(items.conflicts ?? [])]) if (!rows.has(id(r))) rows.set(id(r), r);
   const row = (r, conflict) => el("tr", {},
-    el("td", { class: "key" }, r.key, r.kind === "segment" ? el("span", { class: "chip" }, "segment") : null),
+    el("td", { class: "key" }, r.key, r.destKey ? el("span", { class: "muted" }, ` (${r.destKey} in B)`) : null, r.kind === "segment" ? el("span", { class: "chip" }, "segment") : null),
     el("td", {}, scopeText(r)),
     el("td", {}, conflict ? syncBadge("conflict", "differs") : "no"));
   const t = el("table", {}, el("thead", {}, el("tr", {}, el("th", {}, "Item"), el("th", {}, "Left as it is"), el("th", { title: "Whether the source changed too, so its change was not applied" }, "Source changed too"))),
