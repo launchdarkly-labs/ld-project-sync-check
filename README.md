@@ -8,7 +8,9 @@ one comparison library so both produce the same report.
 - **Web page**: paste a read-only API token per instance, pick the environment pairs, run. Tokens
   stay in your browser (optionally in `sessionStorage` for the tab) and are only sent to
   LaunchDarkly. The page has no backend and no analytics. Content Security Policy restricts network
-  access to `app.launchdarkly.com`, `app.eu.launchdarkly.com` and the client-side SDK hosts.
+  access to its own origin, `app.launchdarkly.com`, `app.eu.launchdarkly.com` and the client-side SDK hosts.
+  A *drift check* view for the customer and a *migration operator* view that reads the migration's
+  manifest and run record (see [Web page](#web-page)).
 - **CLI**: same comparison, writes `report.json` and `report.md` (the sign-off artefact), exit code
   reflects the result. Also includes an inventory of resources the migration tool does not carry,
   and an SDK-payload comparison (`/sdk/latest-all`) per environment pair.
@@ -117,6 +119,33 @@ deno task sdk-diff --a-project my-project --env-map production:production
 ```
 
 ## Web page
+
+**Two views**, switched in the header (the choice is remembered; `?view=drift` or `?view=operator`
+in the URL picks one for that visit):
+
+- **Drift check**, for anyone checking the target project, such as the customer. It opens with a
+  plain-language verdict and the differences grouped by what they mean: *different and unexpected*,
+  *changed on both sides*, *changed in B after the migration (protected)*, *waiting for the next
+  sync*, *no longer synced* (cut over), *only in B* and *minor differences*. Without the
+  migration's state every difference is unexpected; a report shared by the operator (see below)
+  carries it. Key prefix and "flags only in B as errors" are not offered.
+- **Migration operator** has everything in the drift check, plus a *Migration state* step: pick the
+  sync manifest and, optionally, the run record of the last run (or of a dry run), as with the
+  CLI's `--manifest` and `--run-record`. The files are read in the browser, never uploaded. The
+  manifest fills in empty project keys; a run record from a run that wrote the manifest replaces the
+  environment mapping with the run's. Results then add a last-sync line ("Last sync … · 326 flags
+  tracked · 3.6.1 · dry-run … · 15 protected"), the manifest warnings, what the run left as it is
+  in B (for a dry run: what a real run would leave), a *Sync* column on flags and segments and a
+  *Sync* filter.
+
+**Sharing a report.** *Download JSON* in the operator view, then *Open a shared report…* in any
+view (on the hosted page, for example) shows that report with its sync states, with no tokens and
+no manifest. The file is checked before it is shown, and its status is recomputed from its findings.
+
+**Where it runs.** On GitHub Pages (`*.github.io`) the page opens as the drift check and shows a
+notice about tokens. Served locally (`deno task serve`) it opens as the operator view. A local
+console of ld-migration-scripts (planned) will answer `GET api/console`; the page asks for it
+when it is not on GitHub Pages, so a 404 for `api/console` in the browser console is expected.
 
 Results show flags by lifecycle state: **Active** (default; deprecated flags included and marked),
 **Deprecated**, **Archived** and **All** (archived flags grouped at the end). Archived flags are

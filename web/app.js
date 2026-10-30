@@ -1,11 +1,42 @@
 import { makeClient } from "../lib/ld_api.js";
 import { compareProjects } from "../lib/compare.js";
-import { listFindings, toMarkdown } from "../lib/report.js";
-import { el, inState, renderErrors, renderFindings, renderFlags, renderLists, renderSegments, renderStateTabs, renderStatus, renderSummary, SORTS } from "./render.js";
+import { listFindings, meaningGroups, parseReport, toMarkdown } from "../lib/report.js";
+import { annotateWithManifest, checkSyncInputs, destKeysFromManifest, parseManifest, parseRunRecord, runRecordMismatch, runRecordWroteManifest, SYNC_STATE_LABELS, SYNC_STATES } from "../lib/manifest.js";
+import { el, inState, SYNC_SHORT, renderErrors, renderFindings, renderFlags, renderLists, renderMeaning, renderRunItems, renderSegments, renderStateTabs, renderStatus, renderSummary, renderSyncLine, renderVerdict, SORTS } from "./render.js";
+import { detectHost, initialView, probeConsole, VIEWS } from "./env.js";
 
 const $ = (sel) => document.querySelector(sel);
 const form = $("#form");
-const state = { clients: {}, envs: { a: [], b: [] }, report: null, abort: null, flagState: "active", sort: null };
+const state = {
+  clients: {}, envs: { a: [], b: [] }, report: null, abort: null, flagState: "active", sort: null,
+  host: "local", view: "operator",
+  // Parsed migration-state files (operator view): { json, name } or null
+  manifest: null, runRecord: null,
+  // The environment mapping a run record replaced: { from: the run record, before: [{ a, b }] }
+  mapping: null,
+  running: false,
+};
+
+// --- where the page runs, and the view (drift check or migration operator) ---
+const VIEW_KEY = "ld-sync-check-view";
+const savedView = () => { try { return localStorage.getItem(VIEW_KEY); } catch { return null; } };
+state.host = await detectHost({ hostname: location.hostname, probe: () => probeConsole() });
+document.body.dataset.host = state.host;
+function applyView(view) {
+  state.view = view;
+  document.body.dataset.view = view;
+  for (const b of document.querySelectorAll("#view-switch [data-view-id]")) b.setAttribute("aria-selected", String(b.dataset.viewId === view));
+  if (state.report) render();
+}
+for (const b of document.querySelectorAll("#view-switch [data-view-id]")) {
+  b.addEventListener("click", () => {
+    if (!VIEWS.includes(b.dataset.viewId)) return;
+    try { localStorage.setItem(VIEW_KEY, b.dataset.viewId); } catch { /* storage unavailable */ }
+    applyView(b.dataset.viewId);
+  });
+}
+applyView(initialView({ host: state.host, search: location.search, saved: savedView() }));
+const operator = () => state.view === "operator";
 
 // --- token persistence (opt-in, sessionStorage only) ---
 const KEY = "ld-sync-check";
@@ -128,9 +159,22 @@ form.addEventListener("submit", async (ev) => {
   if (!envMap.length) { progress.textContent = "Add at least one environment pair."; return; }
   const projectA = form.elements["a-project"].value.trim();
   const projectB = form.elements["b-project"].value.trim();
+  if (state.running) return;
   let clientA, clientB;
   try { clientA = clientFor("a"); clientB = clientFor("b"); } catch (err) { progress.textContent = err.message; return; }
+  // Everything is taken as it is now: one set of clients (from the tokens as typed) checks the
+  // migration state and runs the comparison, and the controls stay disabled for all of it
+  const useSync = operator() && (state.manifest || state.runRecord);
+  const syncFiles = { manifestJson: state.manifest?.json ?? null, runRecordJson: state.runRecord?.json ?? null };
+  const options = {
+    includeArchived: form.elements["include-archived"].checked,
+    compareMaintainers: form.elements["compare-maintainers"].checked,
+    // The operator-only options apply in the operator view only
+    strictExtra: operator() && form.elements["strict-extra"].checked,
+    keyPrefix: operator() ? form.elements["key-prefix"].value.trim() : "",
+  };
   const run = $("#run"), cancel = $("#cancel");
+  state.running = true;
   run.disabled = true; cancel.hidden = false;
   const seen = {};
   const onProgress = (p) => {
@@ -144,31 +188,61 @@ form.addEventListener("submit", async (ev) => {
   clientB = makeClient({ baseUrl: clientB.baseUrl, token: form.elements["b-token"].value.trim(), signal: state.abort.signal });
   cancel.onclick = () => state.abort.abort();
   try {
-    const report = await compareProjects({
+    let sync = { manifest: null, runRecord: null, warnings: [] };
+    if (useSync) {
+      progress.textContent = "Checking the migration state…";
+      sync = await checkSyncInputs({
+        ...syncFiles, projectA, projectB, baseUrlB: clientB.baseUrl,
+        accountB: () => clientB.callerIdentity().then((who) => who?.accountId),
+      });
+    }
+    let report = await compareProjects({
       clientA, clientB, projectA, projectB, envMap,
       labels: { a: labelFor(clientA.baseUrl), b: labelFor(clientB.baseUrl) },
-      options: {
-        includeArchived: form.elements["include-archived"].checked,
-        compareMaintainers: form.elements["compare-maintainers"].checked,
-        strictExtra: form.elements["strict-extra"].checked,
-        keyPrefix: form.elements["key-prefix"].value.trim(),
-      },
+      options,
       onProgress,
+      destKeys: sync.manifest ? destKeysFromManifest(sync.manifest) : null,
     });
+    if (sync.manifest) {
+      report = annotateWithManifest(report, sync.manifest, sync.runRecord);
+      report.sync.warnings.unshift(...sync.warnings);
+    }
     state.report = report;
+    state.loadedFrom = null;
     progress.textContent = `Done in ${((Date.now() - startedAt) / 1000).toFixed(1)}s.`;
-    show(report);
+    state.flagState = "active";
+    state.sort = null;
+    show();
   } catch (err) {
     progress.textContent = err.name === "AbortError" ? "Cancelled." : `Failed: ${err.message}`;
   } finally {
+    state.running = false;
     run.disabled = false; cancel.hidden = true;
   }
 });
 
 const labelFor = (u) => (u.includes(".eu.") ? "EU" : u.includes("launchdarkly.com") ? "US" : u.replace(/^https?:\/\//, ""));
 
-function show(report) {
+function show() {
+  render();
+  $("#results").scrollIntoView({ behavior: "smooth" });
+}
+/** Renders state.report for the current view. */
+function render() {
+  const report = state.report;
   $("#results").hidden = false;
+  const loaded = $("#loaded");
+  loaded.hidden = !state.loadedFrom;
+  if (state.loadedFrom) {
+    loaded.textContent = `Showing ${state.loadedFrom}: ${report.sides.a.projectKey} (${report.sides.a.label}) → ${report.sides.b.projectKey} (${report.sides.b.label}), generated ${new Date(report.generatedAt).toLocaleString()}. Run the check above for a current result.`;
+  }
+  const groups = meaningGroups(report);
+  renderVerdict($("#verdict"), report, groups);
+  renderMeaning($("#meaning"), report, groups);
+  const sync = report.sync && !report.sync.ignored ? report.sync : null;
+  renderSyncLine($("#sync-line"), $("#sync-warnings"), report.sync ?? null);
+  renderRunItems($("#run-items"), sync?.run ?? null);
+  renderSyncFilter(sync);
   renderStatus($("#status"), report, (sev) => {
     const d = $(`#findings details[data-sev="${sev}"]`);
     d.open = !d.open;
@@ -181,12 +255,21 @@ function show(report) {
     applyFilter();
     $("#flags").scrollIntoView({ behavior: "smooth", block: "start" });
   });
-  state.flagState = "active";
-  state.sort = null;
   applyFilter();
-  renderSegments($("#segments"), report.segments);
+  renderSegments($("#segments"), report.segments, withSync());
   renderErrors($("#errors"), report.errors);
-  $("#results").scrollIntoView({ behavior: "smooth" });
+}
+const withSync = () => operator() && Boolean(state.report?.sync) && !state.report.sync.ignored;
+function renderSyncFilter(sync) {
+  const select = $("#sync-filter");
+  const current = select.value;
+  select.textContent = "";
+  select.append(el("option", { value: "" }, "all"));
+  for (const s of SYNC_STATES) {
+    const n = sync?.counts?.flags?.[s] ?? 0;
+    if (n) select.append(el("option", { value: s, selected: s === current, title: SYNC_STATE_LABELS[s] }, `${SYNC_SHORT[s]} (${n})`));
+  }
+  $("#sync-filter-label").hidden = !sync;
 }
 /** @param {string} [refocus] selector of a re-rendered control to focus afterwards */
 function applyFilter(refocus) {
@@ -194,9 +277,11 @@ function applyFilter(refocus) {
   if (!report) return;
   const q = $("#filter").value.trim().toLowerCase();
   const st = $("#status-filter").value;
+  const syncState = withSync() ? $("#sync-filter").value : "";
   // Search + result filter first; the state tabs count what those leave.
   const matching = report.flags.filter((f) => {
     if (st && f.status !== st) return false;
+    if (syncState && f.sync?.state !== syncState) return false;
     if (!q) return true;
     if (f.key.toLowerCase().includes(q)) return true;
     return [...f.flagLevel, ...Object.values(f.environments).flat()].some((e) => e.path.toLowerCase().includes(q));
@@ -206,7 +291,7 @@ function applyFilter(refocus) {
   const rows = matching.filter(inState(state.flagState));
   renderLists($("#lists"), report.flags.filter(inState(state.flagState)));
   renderFlags($("#flags"), {
-    flags: rows, sides: report.sides, sort: state.sort, state: state.flagState, archivedFetched, countEl: $("#count"),
+    flags: rows, sides: report.sides, sort: state.sort, state: state.flagState, archivedFetched, countEl: $("#count"), withSync: withSync(),
     onSort: (key) => {
       const s = state.sort;
       state.sort = s?.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: SORTS[key].firstDir };
@@ -218,6 +303,7 @@ function applyFilter(refocus) {
 }
 $("#filter").addEventListener("input", () => applyFilter());
 $("#status-filter").addEventListener("change", () => applyFilter());
+$("#sync-filter").addEventListener("change", () => applyFilter());
 
 function download(name, text, type) {
   const url = URL.createObjectURL(new Blob([text], { type }));
@@ -227,3 +313,113 @@ function download(name, text, type) {
 }
 $("#dl-json").addEventListener("click", () => state.report && download(`sync-report-${state.report.generatedAt}.json`, JSON.stringify(state.report, null, 2), "application/json"));
 $("#dl-md").addEventListener("click", () => state.report && download(`sync-report-${state.report.generatedAt}.md`, toMarkdown(state.report), "text/markdown"));
+
+// --- files: a shared report (both views), the manifest and run record (operator view) ---
+async function readJsonFile(input) {
+  const file = input.files?.[0];
+  if (!file) return null;
+  try {
+    return { name: file.name, json: JSON.parse(await file.text()) };
+  } finally {
+    input.value = ""; // the same file can be picked again after a change on disk
+  }
+}
+const utcText = (iso) => (iso ? `${iso.slice(0, 16).replace("T", " ")}Z` : "unknown");
+
+$("#open-report").addEventListener("change", async (ev) => {
+  const status = $("#open-report-status");
+  try {
+    const file = await readJsonFile(ev.target);
+    if (!file) return;
+    const report = parseReport(file.json);
+    const before = { report: state.report, loadedFrom: state.loadedFrom, flagState: state.flagState, sort: state.sort };
+    Object.assign(state, { report, loadedFrom: file.name, flagState: "active", sort: null });
+    try {
+      show();
+    } catch (err) {
+      // Anything the checks missed must not leave the page on a half-shown file
+      Object.assign(state, before);
+      if (state.report) render();
+      else $("#results").hidden = true;
+      throw err;
+    }
+    status.textContent = "";
+  } catch (err) {
+    status.textContent = `Could not open it: ${err.message}`;
+  }
+});
+
+// The run's environment mapping is the natural one to compare, but only from a run record of the
+// loaded manifest's last run; the mapping it replaced comes back once that no longer holds
+function setRows(pairs) {
+  envmap.textContent = "";
+  if (pairs.length) for (const m of pairs) addRow(m.a, m.b);
+  else addRow();
+}
+function syncMapping() {
+  const r = state.runRecord?.json, m = state.manifest?.json;
+  const from = r && m && runRecordWroteManifest(r) && !runRecordMismatch(r, m) ? state.runRecord : null;
+  if ((state.mapping?.from ?? null) === from) return;
+  if (state.mapping) setRows(state.mapping.before);
+  state.mapping = null;
+  if (from) {
+    state.mapping = { from, before: currentEnvMap() };
+    setRows(Object.entries(r.envMap).map(([a, b]) => ({ a, b })));
+  }
+}
+function runRecordNote(r, m) {
+  if (!m) return " (needs the sync manifest)";
+  const mismatch = runRecordMismatch(r, m);
+  if (mismatch) return ` (${mismatch})`;
+  if (r.dryRun) return " (dry run: its environment mapping is not used)";
+  if (!runRecordWroteManifest(r)) return " (did not write the manifest: its environment mapping is not used)";
+  return " (its environment mapping is applied)";
+}
+function showSyncFiles() {
+  syncMapping();
+  const m = state.manifest, r = state.runRecord;
+  $("#manifest-status").textContent = m
+    ? `${m.name}: ${m.json.sourceProject} → ${m.json.destProject}, last sync ${utcText(m.json.lastSyncTimestamp)}, ${Object.keys(m.json.flags).length} flags tracked`
+    : "";
+  $("#run-record-status").textContent = r
+    ? `${r.name}: ${r.json.mode ?? "run"} ${utcText(r.json.startedAt)}${runRecordNote(r.json, m?.json)}`
+    : "";
+  $("#clear-sync").hidden = !m && !r;
+}
+$("#manifest-file").addEventListener("change", async (ev) => {
+  try {
+    const file = await readJsonFile(ev.target);
+    if (!file) return;
+    parseManifest(file.json);
+    state.manifest = file;
+    // The manifest names the projects; fill them in when they are still empty
+    for (const [side, key] of [["a", file.json.sourceProject], ["b", file.json.destProject]]) {
+      if (!form.elements[`${side}-project`].value.trim()) form.elements[`${side}-project`].value = key;
+    }
+    showSyncFiles();
+  } catch (err) {
+    // The file picked replaces the one before, even when it is unusable
+    state.manifest = null;
+    showSyncFiles();
+    $("#manifest-status").textContent = `Not used: ${err.message}`;
+  }
+});
+$("#run-record-file").addEventListener("change", async (ev) => {
+  try {
+    const file = await readJsonFile(ev.target);
+    if (!file) return;
+    parseRunRecord(file.json);
+    state.runRecord = file;
+    showSyncFiles();
+  } catch (err) {
+    // The file picked replaces the one before, even when it is unusable
+    state.runRecord = null;
+    showSyncFiles();
+    $("#run-record-status").textContent = `Not used: ${err.message}`;
+  }
+});
+$("#clear-sync").addEventListener("click", () => {
+  state.manifest = null;
+  state.runRecord = null;
+  showSyncFiles();
+});

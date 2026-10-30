@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src https://app.launchdarkly.com https://app.eu.launchdarkly.com https://clientsdk.launchdarkly.com https://clientsdk.eu.launchdarkly.com; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' https://app.launchdarkly.com https://app.eu.launchdarkly.com https://clientsdk.launchdarkly.com https://clientsdk.eu.launchdarkly.com; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
   <meta name="referrer" content="no-referrer">
   <meta name="color-scheme" content="dark light">
   <title>LaunchDarkly Project Sync Check</title>
@@ -20,7 +20,13 @@
         <span class="divider" aria-hidden="true"></span>
         <span class="product">Project Sync Check</span>
       </div>
-      <a class="source-link" href="https://github.com/launchdarkly-labs/ld-project-sync-check" rel="noopener noreferrer">Source on GitHub</a>
+      <div class="topbar-end">
+        <div id="view-switch" class="tabs view-switch" role="tablist" aria-label="View">
+          <button type="button" role="tab" data-view-id="drift" aria-selected="false" title="Plain-language result, for anyone checking the target project">Drift check</button>
+          <button type="button" role="tab" data-view-id="operator" aria-selected="false" title="Adds the migration's manifest and run record, sync states and every option">Migration operator</button>
+        </div>
+        <a class="source-link" href="https://github.com/launchdarkly-labs/ld-project-sync-check" rel="noopener noreferrer">Source on GitHub</a>
+      </div>
     </div>
   </header>
 
@@ -28,6 +34,12 @@
     <section class="hero">
       <h1>Are your projects in sync?</h1>
       <p class="lede">Compares two LaunchDarkly projects field by field, as your SDKs would see them. Tokens are sent only to LaunchDarkly and are never stored unless you ask.</p>
+      <p class="notice" data-host="hosted">This page runs entirely in your browser: tokens go from here straight to LaunchDarkly. Use reader tokens, and remove them when you are done. To keep tokens off the browser, run the <a href="https://github.com/launchdarkly-labs/ld-project-sync-check#cli" rel="noopener noreferrer">command-line version</a> instead.</p>
+      <div class="open-report">
+        <label class="file-button ghost small">Open a shared report… <input id="open-report" type="file" accept=".json,application/json"></label>
+        <span class="hint">A report JSON from this tool, for example one your migration team sent you. Nothing is fetched.</span>
+        <span id="open-report-status" class="muted" aria-live="polite"></span>
+      </div>
     </section>
 
     <form id="form" autocomplete="off">
@@ -79,9 +91,21 @@
         <div class="options">
           <label class="check"><input type="checkbox" name="include-archived" checked> Include archived flags</label>
           <label class="check"><input type="checkbox" name="compare-maintainers"> Compare maintainers (by email)</label>
-          <label class="check"><input type="checkbox" name="strict-extra"> Treat flags only in B as errors</label>
+          <label class="check" data-view="operator"><input type="checkbox" name="strict-extra"> Treat flags only in B as errors</label>
           <label class="check" title="Stored in sessionStorage; cleared when the tab closes"><input type="checkbox" name="remember"> Remember tokens for this tab</label>
-          <label class="inline">Key prefix on B <input name="key-prefix" placeholder="(none)" spellcheck="false"></label>
+          <label class="inline" data-view="operator">Key prefix on B <input name="key-prefix" placeholder="(none)" spellcheck="false"></label>
+        </div>
+      </section>
+
+      <section class="step" data-view="operator">
+        <header class="step-head"><span class="num">4</span><h2>Migration state <span class="muted optional">optional</span></h2></header>
+        <p class="hint">From ld-migration-scripts: the sync manifest (<code>data/launchdarkly-migrations/sync-manifest-&lt;source&gt;-&lt;dest&gt;.json</code>) labels each difference with why it exists, and pairs keys as the migration recorded them. The run record of the last run (<code>runs/&lt;source&gt;/&lt;dest&gt;/latest.json</code>) adds what that run left as it is. The files are read here, never uploaded.</p>
+        <div class="sync-files">
+          <label class="file-button ghost small">Sync manifest… <input id="manifest-file" type="file" accept=".json,application/json"></label>
+          <span id="manifest-status" class="file-status muted" aria-live="polite"></span>
+          <label class="file-button ghost small">Run record… <input id="run-record-file" type="file" accept=".json,application/json"></label>
+          <span id="run-record-status" class="file-status muted" aria-live="polite"></span>
+          <button type="button" id="clear-sync" class="ghost small" hidden>Clear</button>
         </div>
       </section>
 
@@ -94,6 +118,7 @@
     </form>
 
     <section id="results" hidden>
+      <p id="loaded" class="notice" hidden></p>
       <div class="status-row">
         <div id="status" class="status"></div>
         <div class="downloads">
@@ -101,6 +126,11 @@
           <button type="button" id="dl-md" class="ghost small">Download Markdown</button>
         </div>
       </div>
+      <p id="verdict" class="verdict-text"></p>
+      <p id="sync-line" class="sync-line" data-view="operator" hidden></p>
+      <ul id="sync-warnings" class="sync-warnings" data-view="operator" hidden></ul>
+      <div id="meaning" class="meaning"></div>
+      <div id="run-items" data-view="operator"></div>
       <div id="findings" class="findings-list"></div>
       <div id="summary" class="summary"></div>
 
@@ -118,6 +148,9 @@
             <option value="extraInB">only in B</option>
             <option value="identical">identical</option>
           </select>
+        </label>
+        <label id="sync-filter-label" data-view="operator" hidden>Sync
+          <select id="sync-filter"></select>
         </label>
         <span id="count" class="muted"></span>
       </div>
