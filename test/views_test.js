@@ -96,10 +96,16 @@ Deno.test("a shared report round-trips and its status is recomputed", () => {
   assertEquals(verdictText(tampered), "Out of sync: 1 item with unexpected differences.");
 });
 
+Deno.test("a sync state from a shared file that is no known state groups by severity", () => {
+  const report = JSON.parse(JSON.stringify(annotateWithManifest(reportFor([flagA], [editedInEu()]), manifest())));
+  report.flags[0].sync = { state: "constructor", flagLevel: "constructor", environments: { "prod→production": "toString" } };
+  assertEquals(meaningGroups(parseReport(report)).map((g) => g.id), ["minor"]);
+});
+
 Deno.test("parseReport rejects a sync block the page cannot read", () => {
   const report = JSON.parse(JSON.stringify(annotateWithManifest(reportFor([flagA], [editedInEu()]), manifest())));
   parseReport(report);
-  for (const sync of [{ manifest: {}, warnings: [] }, { ...report.sync, counts: {} }, { ...report.sync, cutOver: null }, { ...report.sync, run: { startedAt: "x", protected: "1", conflicts: 0 } }, { ...report.sync, run: { startedAt: "x", protected: 1, conflicts: 0, items: { protected: [{}], conflicts: [] } } }]) {
+  for (const sync of [{ manifest: {}, warnings: [] }, { ...report.sync, counts: {} }, { ...report.sync, cutOver: null }, { ...report.sync, run: { startedAt: "x", protected: "1", conflicts: 0 } }, { ...report.sync, run: { startedAt: "x", protected: 1, conflicts: 0, dryRun: true, mode: 3 } }, { ...report.sync, run: { startedAt: "x", protected: 1, conflicts: 0, items: { protected: [{}], conflicts: [] } } }]) {
     assertThrows(() => parseReport({ ...report, sync }), Error, "(sync)");
   }
 });

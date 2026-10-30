@@ -331,12 +331,19 @@ $("#open-report").addEventListener("change", async (ev) => {
   try {
     const file = await readJsonFile(ev.target);
     if (!file) return;
-    state.report = parseReport(file.json);
-    state.loadedFrom = file.name;
+    const report = parseReport(file.json);
+    const before = { report: state.report, loadedFrom: state.loadedFrom, flagState: state.flagState, sort: state.sort };
+    Object.assign(state, { report, loadedFrom: file.name, flagState: "active", sort: null });
+    try {
+      show();
+    } catch (err) {
+      // Anything the checks missed must not leave the page on a half-shown file
+      Object.assign(state, before);
+      if (state.report) render();
+      else $("#results").hidden = true;
+      throw err;
+    }
     status.textContent = "";
-    state.flagState = "active";
-    state.sort = null;
-    show();
   } catch (err) {
     status.textContent = `Could not open it: ${err.message}`;
   }

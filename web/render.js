@@ -374,6 +374,14 @@ export function renderSyncLine(line, warningsList, sync) {
   warningsList.hidden = !warnings.length;
 }
 
+// The scopes migrate records: "flag", "environment" and "deleted" (segments carry their environment)
+const scopeText = (r) => {
+  if (r.scope === "flag") return "flag-level fields";
+  if (r.scope === "deleted") return r.env ? `deleted in ${r.env}` : "deleted";
+  if (r.scope === "environment" || (!r.scope && r.env)) return `environment ${r.env ?? ""}`;
+  return r.scope ?? "—";
+};
+
 /** What the last run (as its run record tells) left as it is in B. */
 export function renderRunItems(container, run) {
   container.textContent = "";
@@ -386,7 +394,7 @@ export function renderRunItems(container, run) {
   for (const r of [...(items.protected ?? []), ...(items.conflicts ?? [])]) if (!rows.has(id(r))) rows.set(id(r), r);
   const row = (r, conflict) => el("tr", {},
     el("td", { class: "key" }, r.key, r.kind === "segment" ? el("span", { class: "chip" }, "segment") : null),
-    el("td", {}, r.scope === "environment" ? `environment ${r.env ?? ""}` : r.scope === "flag" ? "flag-level fields" : r.scope ?? (r.env ? `environment ${r.env}` : "—")),
+    el("td", {}, scopeText(r)),
     el("td", {}, conflict ? syncBadge("conflict", "differs") : "no"));
   const t = el("table", {}, el("thead", {}, el("tr", {}, el("th", {}, "Item"), el("th", {}, "Left as it is"), el("th", { title: "Whether the source changed too, so its change was not applied" }, "Source changed too"))),
     el("tbody", {}, [...rows.values()].map((r) => row(r, conflictIds.has(id(r)) || r.sourceChanged === true))));

@@ -55,11 +55,15 @@ const clientA = makeClient({ baseUrl: aUrl, token: tokenA, log });
 const clientB = makeClient({ baseUrl: bUrl, token: tokenB, log });
 
 const readJson = async (path, what) => {
+  let json;
   try {
-    return JSON.parse(await Deno.readTextFile(path));
+    json = JSON.parse(await Deno.readTextFile(path));
   } catch (err) {
     fail(`could not read ${what} ${path}: ${err.message}`);
   }
+  // null stands for "not given" below; a file that holds it is no manifest or run record
+  if (json === null) fail(`${what} ${path} holds null`);
+  return json;
 };
 const manifestPath = args.manifest ?? cfg.manifest;
 const runRecordPath = args["run-record"] ?? cfg.runRecord;
