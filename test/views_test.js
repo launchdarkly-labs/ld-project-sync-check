@@ -1,6 +1,6 @@
 import { assertEquals, assertRejects, assertThrows } from "@std/assert";
 import { compareFlags, compareSegments } from "../lib/compare.js";
-import { meaningGroups, parseReport, summarize, syncStatusLine, verdictText } from "../lib/report.js";
+import { listFindings, meaningGroups, parseReport, summarize, syncStatusLine, verdictText } from "../lib/report.js";
 import { annotateWithManifest, checkSyncInputs } from "../lib/manifest.js";
 import { flagA, flagBIdentical, segmentA, segmentBIdentical } from "./fixtures/flags.js";
 
@@ -100,6 +100,39 @@ Deno.test("a sync state from a shared file that is no known state groups by seve
   const report = JSON.parse(JSON.stringify(annotateWithManifest(reportFor([flagA], [editedInEu()]), manifest())));
   report.flags[0].sync = { state: "constructor", flagLevel: "constructor", environments: { "prod→production": "toString" } };
   assertEquals(meaningGroups(parseReport(report)).map((g) => g.id), ["minor"]);
+});
+
+Deno.test("a flag that differs for two reasons counts once in the verdict", () => {
+  // EU edited production; US changed dev since the last sync
+  const b = editedInEu();
+  const a = clone(flagA);
+  a.environments.dev = { ...a.environments.dev, on: !a.environments.dev.on, version: (a.environments.dev.version ?? 1) + 1, _version: (a.environments.dev._version ?? 1) + 1 };
+  const m = manifest();
+  m.flags["checkout-v2"].environments.dev = { version: a.environments.dev.version - 1 };
+  m.flags["checkout-v2"].dest.environments.development = { version: b.environments.development.version };
+  const report = annotateWithManifest(reportFor([a], [b]), m);
+  const groups = meaningGroups(report);
+  assertEquals(groups.map((g) => g.id), ["protected", "pending"]);
+  assertEquals(verdictText(report, groups), "In sync, apart from expected differences (1 item).");
+});
+
+Deno.test("a prefixed copy and an unrelated B flag with the source's key are two items", () => {
+  const prefixed = { ...editedInEu(), key: "mig-checkout-v2" };
+  const flags = compareFlags({ live: [flagA], archived: [] }, { live: [prefixed, clone(flagBIdentical)], archived: [] }, envMap, { ...opts, keyPrefix: "mig-" });
+  const report = { ...reportFor([flagA], [flagBIdentical]), flags };
+  report.summary = summarize(report, { totalA: 1, totalB: 2 });
+  const groups = meaningGroups(report);
+  assertEquals(groups.map((g) => [g.id, g.items.map((x) => `${x.key}/${x.keyB ?? x.key}`)]), [["unexpected", ["checkout-v2/mig-checkout-v2"]], ["onlyInB", ["checkout-v2/checkout-v2"]]]);
+  assertEquals(verdictText(report, groups), "Out of sync: 1 item with unexpected differences.");
+  assertEquals(new Set(listFindings(report).map((x) => `${x.key}/${x.keyB ?? x.key}`)).size, 2);
+});
+
+Deno.test("a shared report's result tiles are recomputed; only project totals come from the file", () => {
+  const shared = JSON.parse(JSON.stringify(reportFor([flagA], [editedInEu()])));
+  shared.summary.flags = { ...shared.summary.flags, identical: 7, differing: 0, missingInB: 3 };
+  const parsed = parseReport(shared);
+  assertEquals([parsed.summary.flags.identical, parsed.summary.flags.differing, parsed.summary.flags.missingInB, parsed.summary.flags.a], [0, 1, 0, 1]);
+  assertThrows(() => parseReport({ ...shared, summary: { ...shared.summary, flags: { a: -1 } } }), Error, "summary.flags.a");
 });
 
 Deno.test("parseReport rejects a sync block the page cannot read", () => {
