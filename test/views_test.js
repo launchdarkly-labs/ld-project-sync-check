@@ -1,6 +1,6 @@
 import { assertEquals, assertRejects, assertThrows } from "@std/assert";
 import { compareFlags, compareSegments } from "../lib/compare.js";
-import { meaningGroups, parseReport, summarize, syncStatusLine, verdictText } from "../lib/report.js";
+import { listFindings, meaningGroups, parseReport, summarize, syncStatusLine, verdictText } from "../lib/report.js";
 import { annotateWithManifest, checkSyncInputs } from "../lib/manifest.js";
 import { flagA, flagBIdentical, segmentA, segmentBIdentical } from "./fixtures/flags.js";
 
@@ -114,6 +114,17 @@ Deno.test("a flag that differs for two reasons counts once in the verdict", () =
   const groups = meaningGroups(report);
   assertEquals(groups.map((g) => g.id), ["protected", "pending"]);
   assertEquals(verdictText(report, groups), "In sync, apart from expected differences (1 item).");
+});
+
+Deno.test("a prefixed copy and an unrelated B flag with the source's key are two items", () => {
+  const prefixed = { ...editedInEu(), key: "mig-checkout-v2" };
+  const flags = compareFlags({ live: [flagA], archived: [] }, { live: [prefixed, clone(flagBIdentical)], archived: [] }, envMap, { ...opts, keyPrefix: "mig-" });
+  const report = { ...reportFor([flagA], [flagBIdentical]), flags };
+  report.summary = summarize(report, { totalA: 1, totalB: 2 });
+  const groups = meaningGroups(report);
+  assertEquals(groups.map((g) => [g.id, g.items.map((x) => `${x.key}/${x.keyB ?? x.key}`)]), [["unexpected", ["checkout-v2/mig-checkout-v2"]], ["onlyInB", ["checkout-v2/checkout-v2"]]]);
+  assertEquals(verdictText(report, groups), "Out of sync: 1 item with unexpected differences.");
+  assertEquals(new Set(listFindings(report).map((x) => `${x.key}/${x.keyB ?? x.key}`)).size, 2);
 });
 
 Deno.test("a shared report's result tiles are recomputed; only project totals come from the file", () => {
