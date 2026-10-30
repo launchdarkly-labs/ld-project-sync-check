@@ -1,7 +1,7 @@
 import { makeClient } from "../lib/ld_api.js";
 import { compareProjects } from "../lib/compare.js";
 import { listFindings, meaningGroups, parseReport, toMarkdown } from "../lib/report.js";
-import { annotateWithManifest, checkSyncInputs, destKeysFromManifest, parseManifest, parseRunRecord, runRecordWroteManifest, SYNC_STATE_LABELS, SYNC_STATES } from "../lib/manifest.js";
+import { annotateWithManifest, checkSyncInputs, destKeysFromManifest, parseManifest, parseRunRecord, runRecordMismatch, runRecordWroteManifest, SYNC_STATE_LABELS, SYNC_STATES } from "../lib/manifest.js";
 import { el, inState, SYNC_SHORT, renderErrors, renderFindings, renderFlags, renderLists, renderMeaning, renderRunItems, renderSegments, renderStateTabs, renderStatus, renderSummary, renderSyncLine, renderVerdict, SORTS } from "./render.js";
 import { detectHost, initialView, probeConsole, VIEWS } from "./env.js";
 
@@ -12,6 +12,8 @@ const state = {
   host: "local", view: "operator",
   // Parsed migration-state files (operator view): { json, name } or null
   manifest: null, runRecord: null,
+  // The environment mapping a run record replaced: { from: the run record, before: [{ a, b }] }
+  mapping: null,
 };
 
 // --- where the page runs, and the view (drift check or migration operator) ---
@@ -158,21 +160,14 @@ form.addEventListener("submit", async (ev) => {
   const projectB = form.elements["b-project"].value.trim();
   let clientA, clientB;
   try { clientA = clientFor("a"); clientB = clientFor("b"); } catch (err) { progress.textContent = err.message; return; }
-  const run = $("#run"), cancel = $("#cancel");
-  run.disabled = true; cancel.hidden = false;
-  const seen = {};
-  const onProgress = (p) => {
-    if (p.phase === "compare") { progress.textContent = "Comparing…"; return; }
-    seen[`${p.phase} ${p.side.toUpperCase()}`] = p.total ? `${p.fetched}/${p.total}` : p.fetched;
-    progress.textContent = Object.entries(seen).map(([k, v]) => `${k} ${v}`).join(" · ");
-  };
   // The migration state and the operator-only options apply in the operator view only
-  const useSync = operator() && state.manifest;
+  const useSync = operator() && (state.manifest || state.runRecord);
   let sync = { manifest: null, runRecord: null, warnings: [] };
+  // Checked before the controls are disabled, so a refusal leaves the page ready for another run
   if (useSync) {
     try {
       sync = await checkSyncInputs({
-        manifestJson: state.manifest.json, runRecordJson: state.runRecord?.json ?? null,
+        manifestJson: state.manifest?.json ?? null, runRecordJson: state.runRecord?.json ?? null,
         projectA, projectB, baseUrlB: clientB.baseUrl,
         accountB: () => clientB.callerIdentity().then((who) => who?.accountId),
       });
@@ -181,6 +176,14 @@ form.addEventListener("submit", async (ev) => {
       return;
     }
   }
+  const run = $("#run"), cancel = $("#cancel");
+  run.disabled = true; cancel.hidden = false;
+  const seen = {};
+  const onProgress = (p) => {
+    if (p.phase === "compare") { progress.textContent = "Comparing…"; return; }
+    seen[`${p.phase} ${p.side.toUpperCase()}`] = p.total ? `${p.fetched}/${p.total}` : p.fetched;
+    progress.textContent = Object.entries(seen).map(([k, v]) => `${k} ${v}`).join(" · ");
+  };
   const startedAt = Date.now();
   state.abort = new AbortController();
   clientA = makeClient({ baseUrl: clientA.baseUrl, token: form.elements["a-token"].value.trim(), signal: state.abort.signal });
@@ -261,7 +264,7 @@ function renderSyncFilter(sync) {
   select.textContent = "";
   select.append(el("option", { value: "" }, "all"));
   for (const s of SYNC_STATES) {
-    const n = sync?.counts.flags[s] ?? 0;
+    const n = sync?.counts?.flags?.[s] ?? 0;
     if (n) select.append(el("option", { value: s, selected: s === current, title: SYNC_STATE_LABELS[s] }, `${SYNC_SHORT[s]} (${n})`));
   }
   $("#sync-filter-label").hidden = !sync;
@@ -337,13 +340,40 @@ $("#open-report").addEventListener("change", async (ev) => {
   }
 });
 
+// The run's environment mapping is the natural one to compare, but only from a run record of the
+// loaded manifest's last run; the mapping it replaced comes back once that no longer holds
+function setRows(pairs) {
+  envmap.textContent = "";
+  if (pairs.length) for (const m of pairs) addRow(m.a, m.b);
+  else addRow();
+}
+function syncMapping() {
+  const r = state.runRecord?.json, m = state.manifest?.json;
+  const from = r && m && runRecordWroteManifest(r) && !runRecordMismatch(r, m) ? state.runRecord : null;
+  if ((state.mapping?.from ?? null) === from) return;
+  if (state.mapping) setRows(state.mapping.before);
+  state.mapping = null;
+  if (from) {
+    state.mapping = { from, before: currentEnvMap() };
+    setRows(Object.entries(r.envMap).map(([a, b]) => ({ a, b })));
+  }
+}
+function runRecordNote(r, m) {
+  if (!m) return " (needs the sync manifest)";
+  const mismatch = runRecordMismatch(r, m);
+  if (mismatch) return ` (${mismatch})`;
+  if (r.dryRun) return " (dry run: its environment mapping is not used)";
+  if (!runRecordWroteManifest(r)) return " (did not write the manifest: its environment mapping is not used)";
+  return " (its environment mapping is applied)";
+}
 function showSyncFiles() {
+  syncMapping();
   const m = state.manifest, r = state.runRecord;
   $("#manifest-status").textContent = m
     ? `${m.name}: ${m.json.sourceProject} → ${m.json.destProject}, last sync ${utcText(m.json.lastSyncTimestamp)}, ${Object.keys(m.json.flags).length} flags tracked`
     : "";
   $("#run-record-status").textContent = r
-    ? `${r.name}: ${r.json.mode ?? "run"} ${utcText(r.json.startedAt)}${r.json.dryRun ? " (dry run: its environment mapping is not used)" : ""}`
+    ? `${r.name}: ${r.json.mode ?? "run"} ${utcText(r.json.startedAt)}${runRecordNote(r.json, m?.json)}`
     : "";
   $("#clear-sync").hidden = !m && !r;
 }
@@ -371,11 +401,6 @@ $("#run-record-file").addEventListener("change", async (ev) => {
     if (!file) return;
     parseRunRecord(file.json);
     state.runRecord = file;
-    // The run's environment mapping is the natural one to compare, when that run wrote the manifest
-    if (runRecordWroteManifest(file.json)) {
-      envmap.textContent = "";
-      for (const [a, b] of Object.entries(file.json.envMap)) addRow(a, b);
-    }
     showSyncFiles();
   } catch (err) {
     // The file picked replaces the one before, even when it is unusable

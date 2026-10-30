@@ -75,7 +75,7 @@ Deno.test("the last-sync line names the run, its mode and what it left as it is"
   const run = { schemaVersion: 1, startedAt: "2026-10-28T12:37:16.387Z", envMap: { prod: "production" }, mode: "dry-run", dryRun: true, toolVersion: "3.6.1", source: { projectKey: "p" }, destination: { projectKey: "p", domain: "app.eu.launchdarkly.com" }, protected: [{ kind: "flag", key: "checkout-v2", scope: "environment", env: "production", sourceChanged: false, extra: "dropped" }] };
   const report = annotateWithManifest(reportFor([flagA], [editedInEu()]), manifest(), run);
   assertEquals(syncStatusLine(report.sync), "Last sync 2026-10-22 09:00Z · 1 flags tracked · 3.6.1 · dry-run 2026-10-28 12:37Z · 1 protected");
-  assertEquals(syncStatusLine({ ...report.sync, run: { ...report.sync.run, mode: "incremental", conflicts: 2 } }).endsWith("incremental (dry run) 2026-10-28 12:37Z · 1 protected · 2 conflicts"), true);
+  assertEquals(syncStatusLine({ ...report.sync, run: { ...report.sync.run, mode: "incremental", conflicts: 2 } }).endsWith("incremental (dry run) 2026-10-28 12:37Z · 1 protected (2 conflicts)"), true);
   assertEquals(report.sync.run.items, { protected: [{ kind: "flag", key: "checkout-v2", scope: "environment", env: "production", sourceChanged: false }], conflicts: [] });
   assertEquals(syncStatusLine(undefined), "");
 });
@@ -90,7 +90,18 @@ Deno.test("a shared report round-trips and its status is recomputed", () => {
   assertEquals(meaningGroups(parsed), meaningGroups(report));
   // A tampered finding counts as what it says
   shared.flags[0].environments["prod→production"][0].severity = "error";
-  assertEquals(parseReport(shared).summary.status, "fail");
+  const tampered = parseReport(shared);
+  assertEquals(tampered.summary.status, "fail");
+  // The verdict counts the findings too, not the flag's own (stale) severity
+  assertEquals(verdictText(tampered), "Out of sync: 1 item with unexpected differences.");
+});
+
+Deno.test("parseReport rejects a sync block the page cannot read", () => {
+  const report = JSON.parse(JSON.stringify(annotateWithManifest(reportFor([flagA], [editedInEu()]), manifest())));
+  parseReport(report);
+  for (const sync of [{ manifest: {}, warnings: [] }, { ...report.sync, counts: {} }, { ...report.sync, cutOver: null }, { ...report.sync, run: { startedAt: "x", protected: "1", conflicts: 0 } }, { ...report.sync, run: { startedAt: "x", protected: 1, conflicts: 0, items: { protected: [{}], conflicts: [] } } }]) {
+    assertThrows(() => parseReport({ ...report, sync }), Error, "(sync)");
+  }
 });
 
 Deno.test("parseReport rejects other files and non-https links", () => {

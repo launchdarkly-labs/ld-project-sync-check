@@ -379,13 +379,18 @@ export function renderRunItems(container, run) {
   container.textContent = "";
   const items = run?.items;
   if (!items || (!items.protected?.length && !items.conflicts?.length)) return;
+  // The conflicts are a subset of the protected edits (the source changed too): one row each
+  const id = (r) => `${r.kind} ${r.key} ${r.scope ?? ""} ${r.env ?? ""}`;
+  const conflictIds = new Set((items.conflicts ?? []).map(id));
+  const rows = new Map();
+  for (const r of [...(items.protected ?? []), ...(items.conflicts ?? [])]) if (!rows.has(id(r))) rows.set(id(r), r);
   const row = (r, conflict) => el("tr", {},
     el("td", { class: "key" }, r.key, r.kind === "segment" ? el("span", { class: "chip" }, "segment") : null),
     el("td", {}, r.scope === "environment" ? `environment ${r.env ?? ""}` : r.scope === "flag" ? "flag-level fields" : r.scope ?? (r.env ? `environment ${r.env}` : "—")),
-    el("td", {}, conflict || r.sourceChanged ? syncBadge("conflict", "differs") : "no"));
+    el("td", {}, conflict ? syncBadge("conflict", "differs") : "no"));
   const t = el("table", {}, el("thead", {}, el("tr", {}, el("th", {}, "Item"), el("th", {}, "Left as it is"), el("th", { title: "Whether the source changed too, so its change was not applied" }, "Source changed too"))),
-    el("tbody", {}, (items.protected ?? []).map((r) => row(r, false)), (items.conflicts ?? []).map((r) => row(r, true))));
-  const n = (items.protected?.length ?? 0) + (items.conflicts?.length ?? 0);
+    el("tbody", {}, [...rows.values()].map((r) => row(r, conflictIds.has(id(r)) || r.sourceChanged === true))));
+  const n = rows.size;
   container.append(el("details", { class: "run-items" },
     el("summary", {}, run.dryRun
       ? `The dry run found ${n} edit${n === 1 ? "" : "s"} in B that a real run would leave as ${n === 1 ? "it is" : "they are"}`
